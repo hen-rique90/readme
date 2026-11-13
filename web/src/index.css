@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .input {
+    @apply w-full px-3.5 py-2.5 rounded-xl border border-purple-200 bg-white text-sm focus:border-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-100;
+  }
+  .label {
+    @apply block text-xs font-bold text-slate-600 mb-1;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-bold text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition;
+  }
+  .btn-soft {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-purple-50 text-purple-800 hover:bg-purple-100 font-bold text-xs disabled:opacity-50 transition;
+  }
+  .card {
+    @apply bg-white rounded-3xl border border-purple-100 shadow-sm;
+  }
+}
