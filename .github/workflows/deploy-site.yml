@@ -1,7 +1,7 @@
 # Publica o site no GitHub Pages a cada push na branch main.
-# Configure em: Settings > Secrets and variables > Actions > Variables
-#   VITE_API_URL = URL do App da Web do Apps Script (termina em /exec)
-# e em Settings > Pages > Source = "GitHub Actions".
+# A URL do Apps Script fica em web/.env.production. Para trocá-la sem commit,
+# crie a variável VITE_API_URL em Settings > Secrets and variables > Actions > Variables.
+# Settings > Pages > Source = "GitHub Actions".
 name: Publicar site
 
 on:
@@ -34,9 +34,12 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm test
-      - run: npm run build
+      - name: Build
         env:
-          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          API_URL_OVERRIDE: ${{ vars.VITE_API_URL }}
+        run: |
+          if [ -n "$API_URL_OVERRIDE" ]; then export VITE_API_URL="$API_URL_OVERRIDE"; fi
+          npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist

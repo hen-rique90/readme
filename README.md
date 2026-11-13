@@ -47,7 +47,7 @@ web/tests/            → testes automáticos do backend
 
 ### 2. Site
 **Opção A — GitHub Pages (automático)**
-1. No GitHub: **Settings → Secrets and variables → Actions → Variables → New variable**: nome `VITE_API_URL`, valor = a URL `/exec`.
+1. Coloque a URL `/exec` em `web/.env.production` (ou crie a variável `VITE_API_URL` em **Settings → Secrets and variables → Actions → Variables**, que tem prioridade).
 2. **Settings → Pages → Source: GitHub Actions**.
 3. Faça merge na branch `main`. O workflow `.github/workflows/deploy-site.yml` roda os testes e publica.
    *(GitHub Pages em repositório privado exige plano pago. Nesse caso, use a opção B.)*
