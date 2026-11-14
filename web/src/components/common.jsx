@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { imageCandidates } from '../utils';
 import { Check, Copy, Loader2, Sparkles, X } from 'lucide-react';
 
 export function Toast({ toast, onClose }) {
@@ -51,11 +52,23 @@ export function CopyButton({ text, label = 'Copiar', className = '' }) {
 }
 
 export function ProductImage({ src, className, alt = '', emojiSize = 'text-2xl' }) {
-  const [failed, setFailed] = useState(false);
-  if (!src || failed) {
+  const candidates = imageCandidates(src);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => setAttempt(0), [src]);
+  if (attempt >= candidates.length) {
     return <div className={`${className} bg-purple-50 flex items-center justify-center ${emojiSize}`}>💜</div>;
   }
-  return <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} className={`${className} object-cover`} />;
+  return (
+    <img
+      key={candidates[attempt]}
+      src={candidates[attempt]}
+      alt={alt}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setAttempt((a) => a + 1)}
+      className={`${className} object-cover`}
+    />
+  );
 }
 
 export function Spinner({ className = 'w-5 h-5' }) {

@@ -93,3 +93,26 @@ export const downloadCSV = (filename, headers, rows) => {
   a.remove();
   URL.revokeObjectURL(url);
 };
+
+// Converte links de página (Google Drive, Imgur) em links diretos de imagem.
+// Devolve uma lista de tentativas: se a primeira não carregar, tenta a próxima.
+export const imageCandidates = (raw) => {
+  const url = String(raw || '').trim();
+  if (!url) return [];
+  const drive =
+    url.match(/drive\.google\.com\/file\/d\/([\w-]{10,})/) ||
+    url.match(/drive\.google\.com\/(?:open|uc|thumbnail)\?(?:.*&)?id=([\w-]{10,})/) ||
+    url.match(/docs\.google\.com\/uc\?(?:.*&)?id=([\w-]{10,})/);
+  if (drive) {
+    const id = drive[1];
+    return [
+      `https://drive.google.com/thumbnail?id=${id}&sz=w1000`,
+      `https://lh3.googleusercontent.com/d/${id}=w1000`
+    ];
+  }
+  const imgur = url.match(/^https?:\/\/(?:m\.)?imgur\.com\/(?!a\/|gallery\/)(\w{5,8})(?:[/?#].*)?$/i);
+  if (imgur) return [`https://i.imgur.com/${imgur[1]}.jpg`];
+  return [url];
+};
+
+export const isAlbumLink = (raw) => /imgur\.com\/(a|gallery)\//i.test(String(raw || ''));

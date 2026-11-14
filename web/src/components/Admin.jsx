@@ -6,7 +6,7 @@ import {
 import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
 import {
   CATEGORIES, MEMBERS, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone,
-  memberBadgeColor, orderStatusColor, waLink
+  isAlbumLink, memberBadgeColor, orderStatusColor, waLink
 } from '../utils';
 import { Badge, Modal, ProductImage, Spinner } from './common';
 
@@ -532,7 +532,19 @@ function ProductsTab({ data, run }) {
         <div>
           <label className="label">Link da foto</label>
           <input type="url" value={form.image} onChange={set('image')} placeholder="https://..." className="input" />
-          <p className="text-[11px] text-slate-400 mt-1">Dica: suba a foto no Imgur ou Google Drive (público) e cole o link direto da imagem.</p>
+          {form.image && (
+            <div className="mt-2 flex items-center gap-3">
+              <ProductImage src={form.image} className="w-20 h-20 rounded-xl border border-purple-100 shrink-0" />
+              <p className="text-[11px] text-slate-500">
+                {isAlbumLink(form.image)
+                  ? 'Esse é link de álbum do Imgur. Abra o álbum, clique com o botão direito na foto e use "Copiar endereço da imagem".'
+                  : 'Prévia da foto. Se aparecer só o 💜, a foto não está pública ou o link não é de imagem.'}
+              </p>
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400 mt-1">
+            Aceita link do Google Drive (compartilhado como "Qualquer pessoa com o link") ou do Imgur.
+          </p>
         </div>
         <div className="flex gap-2 pt-1">
           <button className="btn-primary flex-1 py-3" disabled={saving}>
