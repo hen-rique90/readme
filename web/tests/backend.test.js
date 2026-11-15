@@ -532,3 +532,95 @@ test('repasse: ADM recusa, cliente cancela, e ADM repassa direto mesmo sem pagam
   // corrigir uma compradora "a identificar" (sem WhatsApp) pelo mesmo botão
   assert.equal(admin('adminTransferOrder', { orderId: b.order.orderId, name: 'Carla Souza', contact: '@carla', whatsapp: '11955554444' }).ok, true);
 });
+
+// ---------------------------------------------------------------- cobranças do dia, resumo e cartão
+const dayKey = (offset) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+test('cobranças do dia: vencidas, vencendo hoje e em até 2 dias, com mensagem pronta', () => {
+  const { api, admin } = freshBackend();
+  const mk = (name, due, wa) => {
+    const p = addProduct(admin, { name, dueDate: due, totalStock: 5 });
+    return api.call('claim', { ...buyer, whatsapp: wa, productId: p.id, quantity: 1 });
+  };
+  mk('Vencido', dayKey(-3), '11911110001');
+  mk('Hoje', dayKey(0), '11911110002');
+  mk('Em 2 dias', dayKey(2), '11911110003');
+  mk('Em 5 dias', dayKey(5), '11911110004'); // fora da janela
+  const paid = mk('Pago', dayKey(-1), '11911110005');
+  admin('setChargeStatus', { chargeId: paid.charge.chargeId, status: 'Pago' });
+
+  const r = admin('adminReminders');
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.daysBefore, 2);
+  assert.deepEqual(r.groups.map((g) => [g.items[0].productName, g.kind]), [['Vencido', 'overdue'], ['Hoje', 'today'], ['Em 2 dias', 'soon']]);
+  const overdue = r.groups[0];
+  assert.match(overdue.message, /Vencido/);
+  assert.match(overdue.message, /Chave Pix/);
+  assert.ok(overdue.link.startsWith('https://wa.me/5511911110001?text='));
+  assert.equal(overdue.remindedToday, false);
+
+  assert.equal(admin('adminMarkReminded', { chargeIds: overdue.items.map((i) => i.chargeId) }).count, 1);
+  assert.equal(admin('adminReminders').groups[0].remindedToday, true);
+
+  admin('saveConfig', { config: { reminderDaysBefore: 5 } });
+  assert.equal(admin('adminReminders').groups.length, 4, 'janela maior inclui o de 5 dias');
+});
+
+test('resumo diário: e-mail com as cobranças; gatilho diário às 8h', () => {
+  const { api, admin, gas } = freshBackend();
+  const p = addProduct(admin, { dueDate: dayKey(-1) });
+  api.call('claim', { ...buyer, productId: p.id, quantity: 1 });
+
+  assert.equal(admin('adminSendDigest').ok, false, 'sem e-mail cadastrado');
+  assert.equal(admin('saveConfig', { config: { reminderEmail: 'nao-e-email' } }).ok, false);
+  admin('saveConfig', { config: { reminderEmail: 'Loja@Exemplo.com' } });
+  const sent = admin('adminSendDigest');
+  assert.equal(sent.ok, true, sent.error);
+  assert.equal(gas.sentEmails.length, 1);
+  assert.equal(gas.sentEmails[0].to, 'loja@exemplo.com');
+  assert.match(gas.sentEmails[0].subject, /1 vencida/);
+  assert.match(gas.sentEmails[0].htmlBody, /Enviar cobrança no WhatsApp/);
+  assert.equal(JSON.stringify(api.call('catalog')).includes('loja@exemplo.com'), false, 'e-mail não vai para o site público');
+
+  const { api: api2, gas: gas2 } = (() => { const b = freshBackend(); return b; })();
+  gas2.state.sheets['Config'].find((r) => r[0] === 'reminderEmail')[1] = 'x@y.com';
+  api2.run('ativarResumoDiario');
+  api2.run('ativarResumoDiario'); // rodar de novo não duplica
+  assert.equal(gas2.triggers.length, 1);
+  assert.equal(gas2.triggers[0].hour, 8);
+  assert.equal(gas2.sentEmails.length, 2, 'cada ativação manda um e-mail de teste');
+});
+
+test('forma de pagamento: Pix ou cartão no claim; cartão entra na lista de links', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 5, installmentDates: ['2026-12-10', '2027-01-10'] });
+  const card = api.call('claim', { ...buyer, productId: p.id, quantity: 1, paymentMethod: 'Cartão de crédito', paymentPlan: 'parcelado' });
+  assert.equal(card.ok, true, card.error);
+  assert.equal(card.order.paymentMethod, 'Cartão de crédito');
+  assert.equal(card.order.payment, 'Cartão de crédito');
+  assert.equal(card.charges.length, 1, 'cartão não usa as parcelas do Pix');
+  assert.deepEqual(admin('adminReminders').cards.map((c) => c.orderId), [card.order.orderId]);
+
+  const pix = api.call('claim', { ...buyer, productId: p.id, quantity: 1 });
+  assert.equal(pix.order.paymentMethod, 'Pix');
+
+  admin('saveConfig', { config: { acceptCard: false } });
+  assert.equal(api.call('claim', { ...buyer, productId: p.id, quantity: 1, paymentMethod: 'Cartão de crédito' }).ok, false);
+});
+
+test('forma de pagamento: compradora troca logo após o claim (não se for Pix parcelado)', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 5, installmentDates: ['2026-12-10', '2027-01-10'] });
+  const reg = api.call('register', { name: 'Ana', contact: '@ana', whatsapp: '41999990000', password: '123456' });
+  const a = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+  const upd = api.call('updateMyOrder', { token: reg.token, orderId: a.order.orderId, paymentMethod: 'Cartão de crédito' });
+  assert.equal(upd.ok, true, upd.error);
+  assert.equal(upd.order.paymentMethod, 'Cartão de crédito');
+  assert.match(upd.order.history, /forma de pagamento: Cartão de crédito/);
+  const b = api.call('claim', { token: reg.token, productId: p.id, quantity: 1, paymentPlan: 'parcelado' });
+  assert.equal(api.call('updateMyOrder', { token: reg.token, orderId: b.order.orderId, paymentMethod: 'Cartão de crédito' }).ok, false);
+});

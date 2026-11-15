@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown, ChevronUp, Download, Edit3, Eye, EyeOff, KeyRound, Lock, LogOut, Package, Phone, Plus,
-  ReceiptText, RefreshCw, Settings, ShoppingCart, Trash2, Truck, Users
+  BellRing, ReceiptText, RefreshCw, Settings, ShoppingCart, Trash2, Truck, Users
 } from 'lucide-react';
 import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
 import {
@@ -11,6 +11,7 @@ import {
 } from '../utils';
 import { Badge, DateListInput, DueBadge, Modal, ProductImage, ProductTags, Spinner } from './common';
 import SaleTab from './SaleTab';
+import RemindersTab from './RemindersTab';
 
 const PASS_KEY = 'ceg_adm_senha';
 const CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
@@ -56,6 +57,8 @@ export default function Admin({ showToast, onCatalogChange }) {
   }, []);
 
   // Executa uma ação do ADM e recarrega os dados
+  const call = useCallback((action, params = {}) => api(action, { ...params, password }), [password]);
+
   const run = useCallback(async (action, params, successMsg) => {
     try {
       const res = await api(action, { ...params, password });
@@ -79,8 +82,12 @@ export default function Admin({ showToast, onCatalogChange }) {
     }} />;
   }
 
+  const today = data.config.today || '';
+  const dueNow = data.charges.filter((c) => c.status === 'Pendente' && c.dueDate && today && c.dueDate <= today).length;
+
   const tabs = [
     ['orders', ReceiptText, `Pedidos (${data.orders.length})`],
+    ['reminders', BellRing, `Cobranças do dia${dueNow ? ` (${dueNow})` : ''}`],
     ['sale', ShoppingCart, 'Registrar venda'],
     ['buyers', Users, 'Compradoras'],
     ['products', Package, `Produtos (${data.products.length})`],
@@ -122,6 +129,7 @@ export default function Admin({ showToast, onCatalogChange }) {
       {tab === 'orders' && <OrdersTab data={data} run={run} />}
       {tab === 'buyers' && <BuyersTab data={data} run={run} />}
       {tab === 'sale' && <SaleTab data={data} run={run} />}
+      {tab === 'reminders' && <RemindersTab call={call} run={run} showToast={showToast} />}
       {tab === 'products' && <ProductsTab data={data} run={run} />}
       {tab === 'batch' && <BatchChargeTab data={data} run={run} />}
       {tab === 'settings' && <SettingsTab data={data} run={run} />}
@@ -308,6 +316,11 @@ function OrdersTab({ data, run }) {
                     <td className="py-3 px-3">
                       <span className="font-semibold text-slate-800">{o.quantity}x {o.productName}</span>
                       <span className="block text-[11px] text-slate-400">#{o.productId} • {o.batch} • {o.shipping}{o.payment ? ` • ${o.payment}` : ''}</span>
+                      {o.paymentMethod === 'Cartão de crédito' && (
+                        <span className="mt-1 mr-1 inline-block px-2 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-[11px] font-bold text-indigo-800">
+                          💳 Cartão — enviar link
+                        </span>
+                      )}
                       {o.buyerNote && (
                         <span className="mt-1 inline-block px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-[11px] font-semibold text-amber-900">
                           💬 {o.buyerNote}
@@ -1133,6 +1146,39 @@ function SettingsTab({ data, run }) {
           <span className="block text-[11px] font-medium text-purple-700">Desmarcado: quem não tem conta também pode dar claim preenchendo nome, @ e WhatsApp.</span>
         </span>
       </label>
+      <label className="flex items-center gap-3 p-3 rounded-xl bg-purple-50 cursor-pointer">
+        <input type="checkbox" checked={!!form.acceptCard} onChange={(e) => setForm({ ...form, acceptCard: e.target.checked })} className="w-5 h-5 accent-purple-600" />
+        <span className="text-sm font-bold text-purple-900">
+          Aceitar cartão de crédito
+          <span className="block text-[11px] font-medium text-purple-700">A cliente escolhe "Cartão" no claim e vocês mandam o link de pagamento. O site não pede dados de cartão.</span>
+        </span>
+      </label>
+      <div className="rounded-2xl border border-purple-100 p-3 space-y-3">
+        <h4 className="font-extrabold text-slate-800 text-sm">📧 Resumo diário de cobranças</h4>
+        <div className="grid sm:grid-cols-[1fr_9rem] gap-3">
+          <div>
+            <label className="label">E-mail que recebe o resumo</label>
+            <input type="email" value={form.reminderEmail || ''} onChange={set('reminderEmail')} placeholder="voce@exemplo.com" className="input" />
+          </div>
+          <div>
+            <label className="label">Lembrete (dias antes)</label>
+            <input type="number" min="0" max="15" value={form.reminderDaysBefore ?? 2} onChange={set('reminderDaysBefore')} className="input" />
+          </div>
+        </div>
+        <p className={`text-xs font-semibold ${data.config.dailyEmailActive ? 'text-emerald-700' : 'text-amber-700'}`}>
+          {data.config.dailyEmailActive
+            ? '✓ Envio automático ativo: todo dia por volta das 8h (só manda se houver cobrança).'
+            : '⚠️ Envio automático ainda não ativado. No Apps Script, escolha a função "ativarResumoDiario" e clique em Executar (uma vez só).'}
+        </p>
+        <button
+          type="button"
+          className="btn-soft"
+          onClick={() => run('adminSendDigest', {}, (r) => `Resumo enviado para ${r.to}`)}
+        >
+          Enviar um resumo de teste agora
+        </button>
+        <p className="text-[11px] text-slate-400">Salve o e-mail antes de testar. O e-mail sai da conta Google da planilha; confira também a caixa de spam.</p>
+      </div>
       <div>
         <label className="label">Nome da loja</label>
         <input value={form.storeName} onChange={set('storeName')} className="input" />

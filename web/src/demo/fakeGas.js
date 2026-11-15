@@ -155,6 +155,8 @@ export function createFakeGas(state = { sheets: {} }, onChange = () => {}) {
     }
   };
   const cacheStore = new Map();
+  const sentEmails = [];
+  const triggers = [];
   return {
     state,
     SpreadsheetApp: { getActiveSpreadsheet: () => spreadsheet },
@@ -167,6 +169,19 @@ export function createFakeGas(state = { sheets: {} }, onChange = () => {}) {
       })
     },
     Utilities: fakeUtilities,
+    sentEmails,
+    triggers,
+    MailApp: { sendEmail: (msg) => { sentEmails.push(msg); } },
+    Logger: { log: () => {} },
+    ScriptApp: {
+      getProjectTriggers: () => triggers.map((t) => ({ getHandlerFunction: () => t.handler, _t: t })),
+      deleteTrigger: (t) => { triggers.splice(triggers.indexOf(t._t), 1); },
+      newTrigger: (handler) => {
+        const t = { handler };
+        const chain = { timeBased: () => chain, everyDays: () => chain, atHour: (h) => { t.hour = h; return chain; }, create: () => { triggers.push(t); return t; } };
+        return chain;
+      }
+    },
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: (k) => (state.props && k in state.props ? state.props[k] : null),
@@ -186,14 +201,18 @@ export function createFakeGas(state = { sheets: {} }, onChange = () => {}) {
 /** Carrega o código do Apps Script dentro do ambiente simulado. */
 export function loadBackend(code, gas) {
   const factory = new Function(
-    'SpreadsheetApp', 'LockService', 'CacheService', 'ContentService', 'Utilities', 'PropertiesService',
-    `${code}\nreturn { doGet: doGet, doPost: doPost, setup: setup };`
+    'SpreadsheetApp', 'LockService', 'CacheService', 'ContentService', 'Utilities', 'PropertiesService', 'ScriptApp', 'MailApp', 'Logger',
+    `${code}\nreturn { doGet: doGet, doPost: doPost, setup: setup, ativarResumoDiario: ativarResumoDiario, enviarResumoDiario: enviarResumoDiario };`
   );
-  const backend = factory(gas.SpreadsheetApp, gas.LockService, gas.CacheService, gas.ContentService, gas.Utilities, gas.PropertiesService);
+  const backend = factory(gas.SpreadsheetApp, gas.LockService, gas.CacheService, gas.ContentService, gas.Utilities, gas.PropertiesService,
+    gas.ScriptApp, gas.MailApp, gas.Logger);
   return {
     call(action, params = {}) {
       const out = backend.doPost({ postData: { contents: JSON.stringify({ action, ...params }) } });
       return JSON.parse(out.getContent());
+    },
+    run(fnName) {
+      return backend[fnName]();
     },
     get(params = {}) {
       return JSON.parse(backend.doGet({ parameter: params }).getContent());
