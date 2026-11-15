@@ -40,6 +40,13 @@ Ferramenta para anunciar os produtos da CEG. A compradora faz o claim e o item f
 - **Pix ou cartão de crédito:** no claim a cliente escolhe a forma de pagamento (pode trocar logo depois do claim). O site **não pede dados do cartão**: o pedido fica marcado "💳 Cartão", a mensagem de WhatsApp para a loja já diz que ela escolheu cartão, e esses pedidos aparecem em "Cobranças do dia" e no resumo diário para vocês mandarem o link. Dá para desligar o cartão em ADM → Configurações.
 - Os lembretes automáticos são enviados por você (um toque por cliente) porque mensagens automáticas no WhatsApp só são permitidas pela API oficial da Meta.
 
+## Endereços e frete (Melhor Envio + SuperFrete)
+- A cliente cadastra até 5 endereços (o CEP preenche rua/bairro/cidade pelo ViaCEP) em "Minha conta" ou na hora de pedir o envio.
+- Em "Meus Pedidos" → **Pedir envio dos meus itens**: escolhe os itens, o endereço e toca em **Calcular frete**; o site cota no Melhor Envio e no SuperFrete (as duas juntas, do mais barato ao mais caro). A opção escolhida vira a cobrança "Frete nacional" (o preço é recalculado no servidor).
+- Pacote automático: **só photocards = envelope**; **com álbum/DVD/vinil/merch = caixa** (photocards vão dentro e só somam peso). Peso/medidas por categoria editáveis em ADM → Configurações → Frete.
+- **ADM → Envios:** endereço para copiar, itens, pacote, frete pago ou não; informar o valor quando não houve cotação automática; marcar **Enviado** com o rastreio (os itens viram "Enviado") e avisar a cliente no WhatsApp.
+- **Configuração:** ADM → Configurações → Frete: CEP de origem, e-mail técnico e os **tokens** do Melhor Envio e do SuperFrete (guardados em segredo nas Propriedades do script — nunca na planilha nem no site).
+
 ## Estrutura
 
 ```

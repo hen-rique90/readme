@@ -41,6 +41,18 @@ async function getDemoBackend() {
           /* modo demonstração sem armazenamento: segue só em memória */
         }
       });
+      // Demonstração: as "APIs de frete" respondem com preços de exemplo
+      gas.fetchHandler = (url, opt) => {
+        const pkg = JSON.parse(opt.payload).package;
+        const base = 8 + pkg.weight * 12;
+        const me = [
+          { id: 1, name: 'PAC', price: (base + 9).toFixed(2), delivery_time: 7, company: { name: 'Correios', picture: '' } },
+          { id: 2, name: 'SEDEX', price: (base + 22).toFixed(2), delivery_time: 2, company: { name: 'Correios', picture: '' } },
+          { id: 3, name: '.Package', price: (base + 6).toFixed(2), delivery_time: 5, company: { name: 'Jadlog', picture: '' } }
+        ];
+        const sf = [{ id: 17, name: 'Mini Envios', price: +(base + 1).toFixed(2), delivery_time: 9, company: { name: 'Correios', picture: '' } }];
+        return { code: 200, body: url.includes('melhorenvio') ? me : pkg.height <= 4 ? sf : [] };
+      };
       const backend = loadBackend(code, gas);
       if (isNew) seedDemo(backend, gas, DEMO_PASSWORD);
       backend.reset = () => {

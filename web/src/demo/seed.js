@@ -73,6 +73,9 @@ export function seedDemo(backend, gas, password) {
     });
   }
   set('requireLogin', 'SIM');
+  admin('adminSaveShippingSettings', {
+    settings: { fromCep: '01001-000', contactEmail: 'demo@exemplo.com', melhorEnvioToken: 'demo', superFreteToken: 'demo' }
+  });
 
   // Guarda um acesso de exemplo para "Meus Pedidos"
   if (mari.ok) {

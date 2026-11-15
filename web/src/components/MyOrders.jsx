@@ -3,8 +3,20 @@ import { AlertCircle, CheckCircle2, Clock, LogOut, Package, Phone, ReceiptText }
 import { api, IS_DEMO } from '../api';
 import { chargeStatusColor, formatBRL, formatDate, formatDay, formatPhone, isOverdue, loadBuyer, orderStatusColor, saveBuyer, waLink } from '../utils';
 import { Badge, DueBadge, PhoneInput, PixBox, ProductImage, Spinner } from './common';
+import OrderRequests from './OrderRequests';
+import { ShippingPanel } from './ShippingTools';
 
-export default function MyOrders({ config, session, onLogin, onSessionExpired }) {
+// Respostas da loja que a cliente ainda não viu (guardado só neste aparelho)
+const SEEN_KEY = 'ceg_respostas_vistas';
+const readSeen = () => {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY) || '[]');
+  } catch {
+    return [];
+  }
+};
+
+export default function MyOrders({ config, session, onLogin, onSessionExpired, showToast }) {
   const remembered = loadBuyer();
   const [whatsapp, setWhatsapp] = useState(remembered.whatsapp || '');
   const [code, setCode] = useState(remembered.lastCode || '');
@@ -155,6 +167,8 @@ export default function MyOrders({ config, session, onLogin, onSessionExpired })
         </div>
       </div>
 
+      <AnswersBanner orders={orders} />
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <SummaryCard icon={Clock} label="Falta pagar" value={formatBRL(totals.owed)} tone={totals.owed > 0 ? 'amber' : 'slate'} />
         <SummaryCard icon={CheckCircle2} label="Já pago" value={formatBRL(totals.paid)} tone="emerald" />
@@ -211,6 +225,17 @@ export default function MyOrders({ config, session, onLogin, onSessionExpired })
       )}
 
       <div className="space-y-3">
+        {token && (
+          <ShippingPanel
+            orders={orders}
+            shipments={data.shipments || []}
+            token={token}
+            profile={session?.profile}
+            onChanged={() => lookup()}
+            onSessionExpired={onSessionExpired}
+            showToast={showToast}
+          />
+        )}
         <h3 className="font-extrabold text-slate-800">Meus itens ({orders.length} pedido(s))</h3>
         {orders.length === 0 && (
           <div className="card p-8 text-center text-sm text-slate-500">Você ainda não tem pedidos. Seus claims vão aparecer aqui. 💜</div>
@@ -255,6 +280,7 @@ export default function MyOrders({ config, session, onLogin, onSessionExpired })
             {token && o.status !== 'Cancelado' && (
               <TransferRequest order={o} token={token} config={config || data.config} onChanged={() => lookup()} onSessionExpired={onSessionExpired} />
             )}
+            {token && <OrderRequests order={o} token={token} onChanged={() => lookup()} onSessionExpired={onSessionExpired} />}
           </div>
         ))}
       </div>
@@ -359,6 +385,39 @@ function SummaryCard({ icon: Icon, label, value, tone }) {
         <span className="text-[11px] font-bold text-slate-400 uppercase">{label}</span>
         <p className={`text-lg font-black ${tones[tone].split(' ')[0]}`}>{value}</p>
       </div>
+    </div>
+  );
+}
+
+function AnswersBanner({ orders }) {
+  const [seen, setSeen] = useState(readSeen);
+  const answered = orders.flatMap((o) =>
+    (o.requests || []).filter((r) => ['Aceita', 'Resolvida', 'Recusada'].includes(r.status)).map((r) => ({ ...r, order: o }))
+  );
+  const unseen = answered.filter((r) => !seen.includes(r.requestId));
+  if (!unseen.length) return null;
+  const markSeen = () => {
+    const next = [...new Set([...seen, ...unseen.map((r) => r.requestId)])];
+    setSeen(next);
+    try {
+      localStorage.setItem(SEEN_KEY, JSON.stringify(next));
+    } catch {
+      /* sem armazenamento */
+    }
+  };
+  return (
+    <div className="card p-4 border-purple-300 bg-purple-50 space-y-2">
+      <h3 className="font-extrabold text-purple-900">🔔 Você tem {unseen.length} resposta(s) da loja</h3>
+      <ul className="text-sm space-y-1">
+        {unseen.map((r) => (
+          <li key={r.requestId}>
+            <strong>{r.type === 'Prorrogação' ? '📅 Prazo' : '🛠️ Correção'}</strong> — {r.order.productName}:{' '}
+            {r.status === 'Aceita' ? `aceita, novo prazo ${formatDay(r.approvedDate)}` : r.status === 'Resolvida' ? 'resolvida' : 'recusada'}
+            {r.reply ? ` — "${r.reply}"` : ''}
+          </li>
+        ))}
+      </ul>
+      <button type="button" onClick={markSeen} className="btn-soft">Ok, vi</button>
     </div>
   );
 }

@@ -31,7 +31,7 @@ const buyer = { buyerName: 'Mariana Silva', contact: '@mari', whatsapp: '(11) 98
 
 test('cria as abas e a configuração inicial', () => {
   const { gas } = freshBackend();
-  assert.deepEqual(Object.keys(gas.state.sheets).sort(), ['Clientes', 'Cobranças', 'Config', 'Pedidos', 'Produtos']);
+  assert.deepEqual(Object.keys(gas.state.sheets).sort(), ['Clientes', 'Cobranças', 'Config', 'Endereços', 'Envios', 'Pedidos', 'Produtos', 'Solicitações']);
 });
 
 test('ADM bloqueado enquanto a senha padrão não for trocada', () => {
@@ -754,4 +754,202 @@ test('separar pedido "Jin e Jimin": divide valor e cobranças, mantendo o que fo
   assert.match(byMember.Jimin.history, /separado do pedido/);
   const total = gas.state.sheets['Cobranças'].slice(1).reduce((a, r) => a + Number(r[4]), 0);
   assert.equal(total, 30, 'nada some nem sobra nas cobranças');
+});
+
+// ---------------------------------------------------------------- solicitações: correção e prorrogação
+test('prorrogação: cliente pede nova data, ADM aceita (com outra data) e o vencimento muda', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3, dueDate: dayKey(1) });
+  const reg = api.call('register', { name: 'Ana Souza', contact: '@ana', whatsapp: '41999990000', password: '123456' });
+  const { order } = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+
+  assert.equal(api.call('requestExtension', { token: reg.token, orderId: order.orderId, newDate: dayKey(0) }).ok, false, 'data tem que ser futura');
+  const req = api.call('requestExtension', { token: reg.token, orderId: order.orderId, newDate: dayKey(20), message: 'Recebo dia 20' });
+  assert.equal(req.ok, true, req.error);
+  assert.equal(api.call('requestExtension', { token: reg.token, orderId: order.orderId, newDate: dayKey(25) }).ok, false, 'uma por vez');
+
+  const data = admin('adminData');
+  assert.equal(data.requests.length, 1);
+  assert.equal(data.requests[0].status, 'Pendente');
+
+  const ans = admin('adminAnswerRequest', { requestId: req.request.requestId, decision: 'accept', date: dayKey(15), reply: 'Combinado!' });
+  assert.equal(ans.ok, true, ans.error);
+  assert.ok(ans.notifyLink.startsWith('https://wa.me/5541999990000?text='));
+  assert.match(decodeURIComponent(ans.notifyLink), /aceita/);
+
+  const mine = api.call('myOrders', { token: reg.token });
+  assert.equal(mine.orders[0].charges[0].dueDate, dayKey(15));
+  assert.equal(mine.orders[0].requests[0].status, 'Aceita');
+  assert.equal(mine.orders[0].requests[0].reply, 'Combinado!');
+  assert.match(mine.orders[0].history, /prorrogação aceita/);
+  assert.equal(admin('adminAnswerRequest', { requestId: req.request.requestId, decision: 'reject' }).ok, false, 'já respondida');
+});
+
+test('correção: cliente pede, ADM resolve ou recusa; outra pessoa não pede pelo pedido dela', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3 });
+  const reg = api.call('register', { name: 'Ana', contact: '@ana', whatsapp: '41999990000', password: '123456' });
+  const other = api.call('register', { name: 'Bia', contact: '@bia', whatsapp: '21977776666', password: '123456' });
+  const { order } = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+
+  assert.equal(api.call('requestCorrection', { token: other.token, orderId: order.orderId, message: 'O valor está errado' }).ok, false);
+  assert.equal(api.call('requestCorrection', { token: reg.token, orderId: order.orderId, message: 'oi' }).ok, false, 'mensagem curta');
+  const r1 = api.call('requestCorrection', { token: reg.token, orderId: order.orderId, message: 'O valor está errado, era R$ 90' });
+  assert.equal(r1.ok, true, r1.error);
+  const ans = admin('adminAnswerRequest', { requestId: r1.request.requestId, decision: 'resolve', reply: 'Corrigido para R$ 90' });
+  assert.equal(ans.ok, true, ans.error);
+  assert.match(decodeURIComponent(ans.notifyLink), /Corrigido para R\$ 90/);
+
+  const r2 = api.call('requestCorrection', { token: reg.token, orderId: order.orderId, message: 'Quero trocar o membro' });
+  assert.equal(admin('adminAnswerRequest', { requestId: r2.request.requestId, decision: 'reject', reply: 'Não dá para trocar' }).ok, true);
+  const r3 = api.call('requestCorrection', { token: reg.token, orderId: order.orderId, message: 'Outra coisa errada aqui' });
+  assert.equal(api.call('cancelMyRequest', { token: reg.token, requestId: r3.request.requestId }).ok, true);
+  const statuses = api.call('myOrders', { token: reg.token }).orders[0].requests.map((r) => r.status).sort();
+  assert.deepEqual(statuses, ['Cancelada', 'Recusada', 'Resolvida']);
+});
+
+test('resumo diário avisa solicitações pendentes', () => {
+  const { api, admin, gas } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3, dueDate: dayKey(30) });
+  const reg = api.call('register', { name: 'Ana', contact: '@ana', whatsapp: '41999990000', password: '123456' });
+  const { order } = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+  api.call('requestExtension', { token: reg.token, orderId: order.orderId, newDate: dayKey(40) });
+  admin('saveConfig', { config: { reminderEmail: 'loja@exemplo.com' } });
+  gas.state.sheets['Config'].find((r) => r[0] === 'reminderEmail')[1] = 'loja@exemplo.com';
+  api.run('enviarResumoDiario');
+  assert.equal(gas.sentEmails.length, 1, 'manda e-mail mesmo sem cobrança vencendo, porque há solicitação');
+  assert.match(gas.sentEmails[0].subject, /1 solicitação/);
+  assert.match(gas.sentEmails[0].htmlBody, /pede prazo até/);
+});
+
+// ---------------------------------------------------------------- endereços, frete e envios
+const ADDRESS = { label: 'Casa', recipient: 'Ana Souza', cep: '01310-100', street: 'Av. Paulista', number: '1000', complement: 'ap 5', district: 'Bela Vista', city: 'São Paulo', state: 'sp' };
+
+function shippingSetup() {
+  const b = freshBackend();
+  const { api, admin, gas } = b;
+  admin('adminSaveShippingSettings', { settings: { fromCep: '30130-000', contactEmail: 'loja@exemplo.com', melhorEnvioToken: 'tok-me', superFreteToken: 'tok-sf' } });
+  gas.fetchHandler = (url, opt) => {
+    if (url.includes('melhorenvio')) {
+      return { code: 200, body: [
+        { id: 1, name: 'PAC', price: '25.50', delivery_time: 7, company: { name: 'Correios', picture: 'https://x/correios.png' } },
+        { id: 3, name: '.Package', price: '19.90', delivery_time: 5, company: { name: 'Jadlog', picture: 'https://x/jadlog.png' } },
+        { id: 9, name: 'Indisponível', error: 'Fora da área' }
+      ] };
+    }
+    return { code: 200, body: [{ id: 17, name: 'Mini Envios', price: 12.4, delivery_time: 9, company: { name: 'Correios', picture: 'https://x/c.png' } }] };
+  };
+  const pc = addProduct(admin, { name: 'PC Jimin', category: 'Photocards', price: 20, totalStock: 9 });
+  const album = addProduct(admin, { name: 'Álbum', category: 'Álbuns', price: 100, totalStock: 9 });
+  const reg = api.call('register', { name: 'Ana Souza', contact: '@ana', whatsapp: '41999990000', password: '123456' });
+  return { ...b, pc, album, reg };
+}
+
+test('endereços: salvar (validação), listar, editar, apagar e limite de 5', () => {
+  const { api, reg } = shippingSetup();
+  assert.equal(api.call('saveAddress', { token: reg.token, address: { ...ADDRESS, cep: '123' } }).ok, false);
+  const saved = api.call('saveAddress', { token: reg.token, address: ADDRESS });
+  assert.equal(saved.ok, true, saved.error);
+  assert.equal(saved.address.cep, '01310100');
+  assert.equal(saved.address.state, 'SP');
+  const edited = api.call('saveAddress', { token: reg.token, address: { ...ADDRESS, addressId: saved.address.addressId, number: '2000' } });
+  assert.equal(edited.addresses.length, 1);
+  assert.equal(edited.addresses[0].number, '2000');
+  for (let i = 0; i < 4; i++) api.call('saveAddress', { token: reg.token, address: ADDRESS });
+  assert.equal(api.call('saveAddress', { token: reg.token, address: ADDRESS }).ok, false, 'máximo 5');
+  const after = api.call('deleteAddress', { token: reg.token, addressId: saved.address.addressId });
+  assert.equal(after.addresses.length, 4);
+});
+
+test('frete: só photocard vai em envelope; com álbum vira caixa (photocard só soma peso)', () => {
+  const { api, gas, pc, album, reg } = shippingSetup();
+  const addr = api.call('saveAddress', { token: reg.token, address: ADDRESS }).address;
+  const a = api.call('claim', { token: reg.token, productId: pc.id, quantity: 2 }).order;
+  const q1 = api.call('quoteShipping', { token: reg.token, orderIds: [a.orderId], addressId: addr.addressId });
+  assert.equal(q1.ok, true, q1.error);
+  assert.equal(q1.package.kind, 'Envelope');
+  assert.deepEqual([q1.package.height, q1.package.width, q1.package.length], [2, 12, 17]);
+  const sent = JSON.parse(gas.fetches[0].options.payload);
+  assert.deepEqual(sent.from, { postal_code: '30130000' });
+  assert.deepEqual(sent.to, { postal_code: '01310100' });
+  assert.equal(sent.package.kind, undefined, 'só medidas vão para a API');
+  assert.equal(gas.fetches[0].options.headers.Authorization, 'Bearer tok-me');
+  assert.deepEqual(q1.options.map((o) => [o.provider, o.service, o.price]), [
+    ['SuperFrete', 'Mini Envios', 12.4], ['Melhor Envio', '.Package', 19.9], ['Melhor Envio', 'PAC', 25.5]
+  ], 'as duas plataformas, do mais barato ao mais caro, sem as indisponíveis');
+
+  const b = api.call('claim', { token: reg.token, productId: album.id, quantity: 1 }).order;
+  const q2 = api.call('quoteShipping', { token: reg.token, orderIds: [a.orderId, b.orderId], addressId: addr.addressId });
+  assert.equal(q2.package.kind, 'Caixa');
+  assert.deepEqual([q2.package.height, q2.package.width, q2.package.length], [5, 25, 30], 'altura só do álbum');
+  assert.equal(q2.package.weight, 0.84, '700 g + 2×20 g + 100 g de embalagem');
+});
+
+test('envio: escolher opção cria cobrança com o preço do servidor; ADM marca enviado com rastreio', () => {
+  const { api, admin, pc, reg } = shippingSetup();
+  const addr = api.call('saveAddress', { token: reg.token, address: ADDRESS }).address;
+  const o = api.call('claim', { token: reg.token, productId: pc.id, quantity: 1 }).order;
+  const q = api.call('quoteShipping', { token: reg.token, orderIds: [o.orderId], addressId: addr.addressId });
+  assert.equal(api.call('requestShipping', { token: reg.token, orderIds: [o.orderId], addressId: addr.addressId, optionKey: 'Melhor Envio:999', price: 0.01 }).ok, false);
+  const r = api.call('requestShipping', { token: reg.token, orderIds: [o.orderId], addressId: addr.addressId, optionKey: q.options[0].key, price: 0.01 });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.shipment.price, 12.4, 'o preço vem do servidor, não do navegador');
+  assert.equal(r.shipment.status, 'Aguardando pagamento');
+  assert.match(r.shipment.address, /Av\. Paulista, 1000/);
+  assert.equal(api.call('requestShipping', { token: reg.token, orderIds: [o.orderId], addressId: addr.addressId, optionKey: q.options[0].key }).ok, false, 'item já em envio');
+
+  const mine = api.call('myOrders', { token: reg.token });
+  assert.equal(mine.shipments.length, 1);
+  assert.equal(mine.totals.owed, 20 + 12.4);
+  assert.ok(mine.orders[0].charges.some((c) => /Frete nacional — Correios Mini Envios/.test(c.description)));
+
+  const shipped = admin('adminMarkShipped', { shipmentId: r.shipment.shipmentId, tracking: 'BR123456789' });
+  assert.equal(shipped.ok, true, shipped.error);
+  assert.match(decodeURIComponent(shipped.notifyLink), /BR123456789/);
+  const after = api.call('myOrders', { token: reg.token });
+  assert.equal(after.orders[0].status, 'Enviado');
+  assert.equal(after.orders[0].note, 'Rastreio: BR123456789');
+  assert.equal(after.shipments[0].status, 'Enviado');
+});
+
+test('envio sem cotação automática: fica aguardando, ADM informa o valor; tokens nunca vão para o site', () => {
+  const { api, admin, gas, pc, reg } = shippingSetup();
+  gas.fetchHandler = () => ({ code: 401, body: { message: 'Unauthenticated.' } });
+  const addr = api.call('saveAddress', { token: reg.token, address: ADDRESS }).address;
+  const o = api.call('claim', { token: reg.token, productId: pc.id, quantity: 1 }).order;
+  const q = api.call('quoteShipping', { token: reg.token, orderIds: [o.orderId], addressId: addr.addressId });
+  assert.equal(q.unavailable, true);
+  const r = api.call('requestShipping', { token: reg.token, orderIds: [o.orderId], addressId: addr.addressId });
+  assert.equal(r.shipment.status, 'Aguardando cotação');
+  const priced = admin('adminSetShippingPrice', { shipmentId: r.shipment.shipmentId, price: '18,90', service: 'PAC' });
+  assert.equal(priced.ok, true, priced.error);
+  assert.equal(api.call('myOrders', { token: reg.token }).totals.owed, 20 + 18.9);
+
+  const data = admin('adminData');
+  assert.equal(data.config.shipping.melhorEnvio, true);
+  assert.equal(JSON.stringify(data).includes('tok-me'), false, 'token não aparece nem para o painel');
+  assert.equal(JSON.stringify(gas.state.sheets).includes('tok-me'), false, 'token não fica na planilha');
+  assert.equal(JSON.stringify(api.call('catalog')).includes('tok-'), false);
+});
+
+test('frete: cotação de teste no painel e aviso de token vencido', () => {
+  const { admin, gas } = shippingSetup();
+  const ok = admin('adminTestShippingQuote', { cep: '01310-100', category: 'Álbuns' });
+  assert.equal(ok.ok, true, ok.error);
+  assert.equal(ok.package.kind, 'Caixa');
+  assert.equal(ok.options.length, 3);
+  assert.deepEqual(ok.errors, []);
+  assert.equal(admin('adminData').config.shipping.status.melhorEnvio, null, 'sem falha registrada');
+
+  gas.fetchHandler = (url) => (url.includes('melhorenvio')
+    ? { code: 401, body: { message: 'Unauthenticated.' } }
+    : { code: 200, body: [{ id: 17, name: 'Mini Envios', price: 10, delivery_time: 9, company: { name: 'Correios' } }] });
+  const bad = admin('adminTestShippingQuote', { cep: '01310100' });
+  assert.equal(bad.options.length, 1, 'SuperFrete continua funcionando');
+  assert.match(bad.errors[0], /Melhor Envio: HTTP 401 — Unauthenticated\. \(token inválido ou vencido/);
+  const status = admin('adminData').config.shipping.status;
+  assert.match(status.melhorEnvio.error, /401/);
+  assert.equal(status.superFrete, null);
+  assert.equal(JSON.stringify(gas.fetches.at(-2).options.headers['User-Agent']), JSON.stringify('Cantinho da Army CEG (loja@exemplo.com)'));
+  assert.equal(admin('adminTestShippingQuote', { cep: '123' }).ok, false);
 });

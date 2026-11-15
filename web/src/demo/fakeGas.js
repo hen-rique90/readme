@@ -156,8 +156,9 @@ export function createFakeGas(state = { sheets: {} }, onChange = () => {}) {
   };
   const cacheStore = new Map();
   const sentEmails = [];
+  const fetches = [];
   const triggers = [];
-  return {
+  const gas = {
     state,
     SpreadsheetApp: { getActiveSpreadsheet: () => spreadsheet },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
@@ -172,6 +173,17 @@ export function createFakeGas(state = { sheets: {} }, onChange = () => {}) {
     sentEmails,
     triggers,
     MailApp: { sendEmail: (msg) => { sentEmails.push(msg); } },
+    fetches,
+    // Testes trocam isto para simular as APIs de frete: (url, options) => { code, body }
+    fetchHandler: null,
+    UrlFetchApp: {
+      fetch: (url, options = {}) => {
+        fetches.push({ url, options });
+        const handler = gas.fetchHandler || (() => ({ code: 503, body: '{"message":"sem internet na demonstração"}' }));
+        const r = handler(url, options);
+        return { getResponseCode: () => r.code, getContentText: () => (typeof r.body === 'string' ? r.body : JSON.stringify(r.body)) };
+      }
+    },
     Logger: { log: () => {} },
     ScriptApp: {
       getProjectTriggers: () => triggers.map((t) => ({ getHandlerFunction: () => t.handler, _t: t })),
@@ -185,7 +197,8 @@ export function createFakeGas(state = { sheets: {} }, onChange = () => {}) {
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: (k) => (state.props && k in state.props ? state.props[k] : null),
-        setProperty: (k, v) => { state.props = { ...(state.props || {}), [k]: String(v) }; onChange(); }
+        setProperty: (k, v) => { state.props = { ...(state.props || {}), [k]: String(v) }; onChange(); },
+        deleteProperty: (k) => { const next = { ...(state.props || {}) }; delete next[k]; state.props = next; onChange(); }
       })
     },
     ContentService: {
@@ -196,16 +209,17 @@ export function createFakeGas(state = { sheets: {} }, onChange = () => {}) {
       })
     }
   };
+  return gas;
 }
 
 /** Carrega o código do Apps Script dentro do ambiente simulado. */
 export function loadBackend(code, gas) {
   const factory = new Function(
-    'SpreadsheetApp', 'LockService', 'CacheService', 'ContentService', 'Utilities', 'PropertiesService', 'ScriptApp', 'MailApp', 'Logger',
+    'SpreadsheetApp', 'LockService', 'CacheService', 'ContentService', 'Utilities', 'PropertiesService', 'ScriptApp', 'MailApp', 'Logger', 'UrlFetchApp',
     `${code}\nreturn { doGet: doGet, doPost: doPost, setup: setup, ativarResumoDiario: ativarResumoDiario, enviarResumoDiario: enviarResumoDiario };`
   );
   const backend = factory(gas.SpreadsheetApp, gas.LockService, gas.CacheService, gas.ContentService, gas.Utilities, gas.PropertiesService,
-    gas.ScriptApp, gas.MailApp, gas.Logger);
+    gas.ScriptApp, gas.MailApp, gas.Logger, gas.UrlFetchApp);
   return {
     call(action, params = {}) {
       const out = backend.doPost({ postData: { contents: JSON.stringify({ action, ...params }) } });

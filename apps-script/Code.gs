@@ -18,7 +18,10 @@ var SHEETS = {
   products: 'Produtos',
   orders: 'Pedidos',
   charges: 'Cobranças',
-  clients: 'Clientes'
+  clients: 'Clientes',
+  requests: 'Solicitações',
+  addresses: 'Endereços',
+  shipments: 'Envios'
 };
 
 var HEADERS = {
@@ -27,7 +30,12 @@ var HEADERS = {
   orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento', 'Obs. da compradora',
     'Repasse: nome', 'Repasse: WhatsApp', 'Repasse: @', 'Histórico', 'Forma de pagamento', 'Foto'],
   charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento', 'Último lembrete'],
-  clients: ['WhatsApp', 'Nome', '@ (Insta/Twitter)', 'Senha (protegida)', 'Sal', 'Criada em', 'Último acesso', 'Trocar senha']
+  clients: ['WhatsApp', 'Nome', '@ (Insta/Twitter)', 'Senha (protegida)', 'Sal', 'Criada em', 'Último acesso', 'Trocar senha'],
+  requests: ['ID', 'Data', 'Tipo', 'ID Pedido', 'Cobranças', 'WhatsApp', 'Nome', 'Mensagem', 'Nova data pedida', 'Status',
+    'Resposta da loja', 'Respondida em', 'Data aprovada'],
+  addresses: ['ID', 'WhatsApp', 'Apelido', 'Destinatário', 'CEP', 'Rua', 'Número', 'Complemento', 'Bairro', 'Cidade', 'UF', 'Criado em'],
+  shipments: ['ID', 'Data', 'WhatsApp', 'Nome', 'Pedidos', 'Endereço', 'CEP', 'Plataforma', 'Serviço', 'Frete (R$)', 'Prazo (dias)',
+    'Status', 'Rastreio', 'ID Cobrança', 'Pacote']
 };
 
 // Colunas que precisam ser texto puro (evita o Sheets transformar telefone em número)
@@ -36,7 +44,10 @@ var TEXT_COLUMNS = {
   products: [1, 10, 11],
   orders: [1, 3, 9],
   charges: [1, 2, 3, 9],
-  clients: [1, 4, 5]
+  clients: [1, 4, 5],
+  requests: [1, 4, 5, 6, 9, 13],
+  addresses: [1, 2, 5, 7],
+  shipments: [1, 3, 5, 7, 13, 14]
 };
 
 var DEFAULT_CONFIG = [
@@ -51,6 +62,11 @@ var DEFAULT_CONFIG = [
   ['acceptCard', 'SIM', 'SIM = a compradora pode escolher cartão de crédito (a loja envia o link)'],
   ['reminderEmail', '', 'E-mail que recebe o resumo diário de cobranças'],
   ['reminderDaysBefore', '2', 'Quantos dias antes do vencimento entra o lembrete'],
+  ['shippingFromCep', '', 'CEP de onde a loja envia (para calcular o frete)'],
+  ['shippingContactEmail', '', 'E-mail técnico exigido pelas APIs de frete (Melhor Envio / SuperFrete)'],
+  ['shippingSandbox', 'NÃO', 'SIM = usar o ambiente de testes das APIs de frete'],
+  ['shippingDueDays', '3', 'Prazo (dias) para pagar o frete depois de pedir o envio'],
+  ['packageDefaults', '', 'Peso (g) e medidas (cm) padrão por categoria — edite pelo painel'],
   ['adminPassword', 'TROQUE-ESTA-SENHA', 'Senha do Painel ADM (nunca é enviada ao site)']
 ];
 
@@ -60,7 +76,7 @@ var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'no
 var ORDER_STATUSES = ['Reservado', 'Comprado', 'A caminho do Brasil', 'Chegou (na bag)', 'Enviado', 'Entregue', 'Cancelado'];
 var CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 var SHIPPING_OPTIONS = ['Guardar na bag', 'Enviar assim que chegar'];
-var SCHEMA_VERSION = '9';
+var SCHEMA_VERSION = '11';
 var PAYMENT_METHODS = ['Pix', 'Cartão de crédito'];
 var DEFAULT_GROUP = 'BTS'; // produtos antigos, sem grupo, eram todos de BTS
 var SHIPPING_COST_OPTIONS = ['Frete incluso', 'Frete não incluso'];
@@ -101,7 +117,15 @@ var PUBLIC_ACTIONS = {
   updateMyOrder: actionUpdateMyOrder_,
   cancelMyOrder: actionCancelMyOrder_,
   requestTransfer: actionRequestTransfer_,
-  cancelTransferRequest: actionCancelTransferRequest_
+  cancelTransferRequest: actionCancelTransferRequest_,
+  requestCorrection: actionRequestCorrection_,
+  requestExtension: actionRequestExtension_,
+  cancelMyRequest: actionCancelMyRequest_,
+  myAddresses: actionMyAddresses_,
+  saveAddress: actionSaveAddress_,
+  deleteAddress: actionDeleteAddress_,
+  quoteShipping: actionQuoteShipping_,
+  requestShipping: actionRequestShipping_
 };
 
 var ADMIN_ACTIONS = {
@@ -129,7 +153,12 @@ var ADMIN_ACTIONS = {
   adminDeleteAccount: actionAdminDeleteAccount_,
   adminUpdateCharge: actionAdminUpdateCharge_,
   adminUpdateOrder: actionAdminUpdateOrder_,
-  adminSplitOrder: actionAdminSplitOrder_
+  adminSplitOrder: actionAdminSplitOrder_,
+  adminAnswerRequest: actionAdminAnswerRequest_,
+  adminSaveShippingSettings: actionAdminSaveShippingSettings_,
+  adminSetShippingPrice: actionAdminSetShippingPrice_,
+  adminMarkShipped: actionAdminMarkShipped_,
+  adminTestShippingQuote: actionAdminTestShippingQuote_
 };
 
 // Ações que alteram a planilha e precisam da trava
@@ -139,7 +168,10 @@ var WRITE_ACTIONS = {
   register: true, login: true, updateProfile: true, changePassword: true, updateMyOrder: true, cancelMyOrder: true,
   adminResetPassword: true, adminCreateSale: true, adminTransferOrder: true, adminApproveTransfer: true,
   adminRejectTransfer: true, requestTransfer: true, cancelTransferRequest: true, adminMarkReminded: true,
-  adminUpdateBuyer: true, adminDeleteAccount: true, adminUpdateCharge: true, adminUpdateOrder: true, adminSplitOrder: true
+  adminUpdateBuyer: true, adminDeleteAccount: true, adminUpdateCharge: true, adminUpdateOrder: true, adminSplitOrder: true,
+  requestCorrection: true, requestExtension: true, cancelMyRequest: true, adminAnswerRequest: true,
+  saveAddress: true, deleteAddress: true, requestShipping: true, adminSaveShippingSettings: true, adminSetShippingPrice: true,
+  adminMarkShipped: true
 };
 
 function handle_(action, params) {
@@ -652,11 +684,14 @@ function actionMyOrders_(params) {
   var charges = allCharges_().filter(function (c) { return orderIds[c.orderId]; });
   var products = {};
   allProducts_().forEach(function (p) { products[p.id] = p; });
+  var requests = allRequests_().filter(function (r) { return orderIds[r.orderId]; });
+  var shipments = allShipments_().filter(function (sh) { return sh.whatsapp === whatsapp; }).map(strip_);
 
   var orders = mine.map(function (o) {
     var out = strip_(o);
     out.image = o.image || (products[o.productId] ? products[o.productId].image : '');
     out.charges = charges.filter(function (c) { return c.orderId === o.orderId; }).map(strip_);
+    out.requests = requests.filter(function (r) { return r.orderId === o.orderId; }).map(strip_);
     return out;
   }).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; });
 
@@ -670,6 +705,7 @@ function actionMyOrders_(params) {
     ok: true,
     buyer: { name: latest.buyerName, contact: latest.contact, whatsapp: whatsapp },
     orders: orders,
+    shipments: shipments,
     totals: totals,
     config: publicConfig_()
   };
@@ -689,12 +725,15 @@ function actionAdminData_() {
   config.reminderDaysBefore = reminderDays_(map);
   config.dailyEmailActive = dailyTriggerActive_();
   config.today = dateKey_(new Date());
+  config.shipping = shippingSettings_();
   return {
     ok: true,
     config: config,
     products: allProducts_().map(function (p) { return withAvailability_(p, sold); }),
     orders: orders.map(strip_).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; }),
     charges: allCharges_().map(strip_),
+    requests: allRequests_().map(strip_),
+    shipments: allShipments_().map(strip_),
     clients: readRows_('clients').map(toClient_).map(function (c) {
       return { whatsapp: c.whatsapp, name: c.name, contact: c.contact, createdAt: c.createdAt, lastLogin: c.lastLogin, mustChange: c.mustChange };
     })
@@ -1569,6 +1608,16 @@ function digestHtml_(r, config) {
         '</div>';
     });
   });
+  if (r.requests && r.requests.length) {
+    html += '<h3 style="margin:20px 0 8px">📨 Solicitações das clientes esperando resposta (' + r.requests.length + ')</h3>';
+    r.requests.forEach(function (q) {
+      html += '<div style="border:1px solid #fde68a;border-radius:12px;padding:10px 12px;margin:8px 0;font-size:13px">' +
+        '<b>' + esc(q.type) + '</b> — ' + esc(q.name) + ' — pedido ' + esc(q.orderId) +
+        (q.requestedDate ? ' — pede prazo até <b>' + dateText_(q.requestedDate) + '</b>' : '') +
+        (q.message ? '<br><i>"' + esc(q.message) + '"</i>' : '') + '</div>';
+    });
+    html += '<p style="font-size:12px;color:#64748b">Responda em ADM → Solicitações.</p>';
+  }
   if (r.cards.length) {
     html += '<h3 style="margin:20px 0 8px">💳 Escolheram cartão — enviar link (' + r.cards.length + ')</h3>';
     r.cards.forEach(function (c) {
@@ -1588,11 +1637,13 @@ function sendDigest_(force) {
   if (!to) throw userError_('Cadastre o e-mail do resumo em ADM → Configurações.');
   var config = publicConfig_();
   var r = reminderGroups_();
-  var empty = !r.groups.length && !r.cards.length;
+  r.requests = allRequests_().filter(function (q) { return q.status === 'Pendente'; });
+  var empty = !r.groups.length && !r.cards.length && !r.requests.length;
   if (empty && !force) return { sent: false, groups: 0 };
   var count = function (k) { return r.groups.filter(function (g) { return g.kind === k; }).length; };
   var subject = config.storeName + ' — cobranças de ' + dateText_(r.today) + ': ' + count('overdue') + ' vencida(s), ' +
-    count('today') + ' hoje, ' + count('soon') + ' em breve' + (r.cards.length ? ', ' + r.cards.length + ' cartão' : '');
+    count('today') + ' hoje, ' + count('soon') + ' em breve' + (r.cards.length ? ', ' + r.cards.length + ' cartão' : '') +
+    (r.requests.length ? ', ' + r.requests.length + ' solicitação(ões)' : '');
   var html = empty ? '<p>Nenhuma cobrança vencida ou vencendo nos próximos dias. 🎉 (e-mail de teste)</p>' : digestHtml_(r, config);
   MailApp.sendEmail({ to: to, subject: subject, htmlBody: html, name: config.storeName });
   return { sent: true, groups: r.groups.length, cards: r.cards.length, to: to };
@@ -1895,4 +1946,585 @@ function actionAdminSplitOrder_(params) {
     created.push(copy);
   });
   return { ok: true, orders: created };
+}
+
+
+// ----------------------------------------------------------------------------
+// SOLICITAÇÕES DAS CLIENTES: correção e prorrogação de pagamento
+// ----------------------------------------------------------------------------
+var REQUEST_TYPES = { correction: 'Correção', extension: 'Prorrogação' };
+
+function toRequest_(r) {
+  var v = r.v;
+  return {
+    rowNumber: r.rowNumber,
+    requestId: str_(v[0]),
+    createdAt: date_(v[1]),
+    type: str_(v[2]),
+    orderId: str_(v[3]),
+    chargeIds: str_(v[4]) ? str_(v[4]).split(/\s*,\s*/) : [],
+    whatsapp: phone_(v[5]),
+    name: str_(v[6]),
+    message: str_(v[7]),
+    requestedDate: dateKey_(v[8]),
+    status: str_(v[9]) || 'Pendente',
+    reply: str_(v[10]),
+    answeredAt: date_(v[11]),
+    approvedDate: dateKey_(v[12])
+  };
+}
+
+function requestRow_(q) {
+  return [q.requestId, dateCell_(q.createdAt), q.type, q.orderId, (q.chargeIds || []).join(', '), q.whatsapp, q.name, q.message,
+    dateText_(q.requestedDate), q.status, q.reply || '', dateCell_(q.answeredAt), dateText_(q.approvedDate)];
+}
+
+function allRequests_() {
+  return readRows_('requests').map(toRequest_).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; });
+}
+
+function newRequest_(order, type, message, chargeIds, requestedDate) {
+  var ids = {};
+  allRequests_().forEach(function (q) { ids[q.requestId] = true; });
+  var q = {
+    requestId: newId_('SOL-', ids),
+    createdAt: new Date().toISOString(),
+    type: type,
+    orderId: order.orderId,
+    chargeIds: chargeIds || [],
+    whatsapp: order.whatsapp,
+    name: order.buyerName,
+    message: message,
+    requestedDate: requestedDate || '',
+    status: 'Pendente',
+    reply: '',
+    answeredAt: '',
+    approvedDate: ''
+  };
+  appendRow_('requests', requestRow_(q));
+  return q;
+}
+
+function pendingOf_(orderId, type) {
+  return allRequests_().some(function (q) { return q.orderId === orderId && q.type === type && q.status === 'Pendente'; });
+}
+
+// A cliente (logada) conta o que está errado no pedido
+function actionRequestCorrection_(params) {
+  var order = myOrder_(params);
+  var message = str_(params.message).replace(/\s+/g, ' ').slice(0, 500);
+  if (message.length < 5) throw userError_('Conte o que está errado (pelo menos algumas palavras).');
+  if (pendingOf_(order.orderId, REQUEST_TYPES.correction)) throw userError_('Já existe um pedido de correção esperando a loja para esse item.');
+  var q = newRequest_(order, REQUEST_TYPES.correction, message, [], '');
+  return { ok: true, request: strip_(q) };
+}
+
+// A cliente (logada) pede mais prazo para as cobranças pendentes do pedido
+function actionRequestExtension_(params) {
+  var order = myOrder_(params);
+  if (order.status === 'Cancelado') throw userError_('Esse pedido está cancelado.');
+  var pending = orderCharges_(order).filter(function (c) { return c.status === 'Pendente'; });
+  var wanted = params.chargeIds && params.chargeIds.length ? params.chargeIds.map(str_) : pending.map(function (c) { return c.chargeId; });
+  var chosen = pending.filter(function (c) { return wanted.indexOf(c.chargeId) >= 0; });
+  if (!chosen.length) throw userError_('Esse pedido não tem pagamento pendente.');
+  var date = dateKey_(params.newDate);
+  var today = dateKey_(new Date());
+  if (!date) throw userError_('Escolha até quando você pode pagar.');
+  if (date <= today) throw userError_('A nova data precisa ser depois de hoje.');
+  if (date > addDaysKey_(today, 180)) throw userError_('Escolha uma data nos próximos 6 meses.');
+  if (pendingOf_(order.orderId, REQUEST_TYPES.extension)) throw userError_('Já existe um pedido de prorrogação esperando a loja para esse item.');
+  var message = str_(params.message).replace(/\s+/g, ' ').slice(0, 500);
+  var q = newRequest_(order, REQUEST_TYPES.extension, message, chosen.map(function (c) { return c.chargeId; }), date);
+  return { ok: true, request: strip_(q) };
+}
+
+function actionCancelMyRequest_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  var q = null;
+  allRequests_().forEach(function (r) { if (r.requestId === str_(params.requestId)) q = r; });
+  if (!q || q.whatsapp !== client.whatsapp) throw userError_('Solicitação não encontrada.');
+  if (q.status !== 'Pendente') throw userError_('A loja já respondeu essa solicitação.');
+  q.status = 'Cancelada';
+  q.answeredAt = new Date().toISOString();
+  writeRow_('requests', q.rowNumber, requestRow_(q));
+  return { ok: true };
+}
+
+// ADM responde: aceitar/recusar prorrogação (pode mudar a data) ou resolver/recusar correção
+function actionAdminAnswerRequest_(params) {
+  var q = null;
+  allRequests_().forEach(function (r) { if (r.requestId === str_(params.requestId)) q = r; });
+  if (!q) throw userError_('Solicitação não encontrada.');
+  if (q.status !== 'Pendente') throw userError_('Essa solicitação já foi respondida.');
+  var decision = str_(params.decision);
+  var reply = str_(params.reply).replace(/\s+/g, ' ').slice(0, 500);
+  var order = findOrder_(q.orderId);
+  var config = publicConfig_();
+  var first = q.name.split(' ')[0];
+  var text;
+
+  if (q.type === REQUEST_TYPES.extension && decision === 'accept') {
+    var date = dateKey_(params.date || q.requestedDate);
+    if (!date) throw userError_('Escolha a nova data.');
+    var changed = 0;
+    orderCharges_(order).forEach(function (c) {
+      if (q.chargeIds.indexOf(c.chargeId) < 0 || c.status !== 'Pendente') return;
+      c.dueDate = date;
+      writeRow_('charges', c.rowNumber, chargeRow_(c));
+      changed++;
+    });
+    q.status = 'Aceita';
+    q.approvedDate = date;
+    addHistory_(order, 'prorrogação aceita até ' + dateText_(date) + (changed ? '' : ' (sem cobranças pendentes)'));
+    writeRow_('orders', order.rowNumber, orderRow_(order));
+    text = 'Oii ' + first + '! 💜 Sua prorrogação do pedido ' + order.orderId + ' (' + order.productName + ') foi *aceita*: o novo prazo é *' +
+      dateText_(date) + '*.' + (reply ? '\n' + reply : '') + '\nVocê vê tudo em "Meus Pedidos" no site.';
+  } else if (q.type === REQUEST_TYPES.correction && decision === 'resolve') {
+    q.status = 'Resolvida';
+    addHistory_(order, 'correção resolvida pela loja');
+    writeRow_('orders', order.rowNumber, orderRow_(order));
+    text = 'Oii ' + first + '! 💜 Sobre a correção que você pediu no pedido ' + order.orderId + ' (' + order.productName + '): ' +
+      (reply || 'já ajustamos!') + '\nConfere em "Meus Pedidos" no site.';
+  } else if (decision === 'reject') {
+    q.status = 'Recusada';
+    text = 'Oii ' + first + '! 💜 Sobre o seu pedido de ' + q.type.toLowerCase() + ' no pedido ' + order.orderId + ' (' + order.productName +
+      '): ' + (reply || 'não conseguimos atender dessa vez.') + (q.type === REQUEST_TYPES.extension ? '\nO prazo continua o mesmo.' : '');
+  } else {
+    throw userError_('Resposta inválida.');
+  }
+  q.reply = reply;
+  q.answeredAt = new Date().toISOString();
+  writeRow_('requests', q.rowNumber, requestRow_(q));
+  return { ok: true, request: strip_(q), notifyLink: waUrl_(q.whatsapp, text), storeName: config.storeName };
+}
+
+// ----------------------------------------------------------------------------
+// ENDEREÇOS, COTAÇÃO DE FRETE (Melhor Envio + SuperFrete) E ENVIOS
+// ----------------------------------------------------------------------------
+// Os tokens das plataformas ficam nas Propriedades do script (secretos):
+// nunca vão para a planilha nem para o site.
+
+// type: 'envelope' (photocard: vai em envelope; dentro de uma caixa só soma peso) ou 'caixa'
+var DEFAULT_PACKAGES = {
+  Photocards: { type: 'envelope', weight: 20, height: 1, width: 12, length: 17 },
+  'Álbuns': { type: 'caixa', weight: 700, height: 5, width: 25, length: 30 },
+  'Merch/DVD': { type: 'caixa', weight: 400, height: 6, width: 20, length: 25 },
+  Vinil: { type: 'caixa', weight: 500, height: 3, width: 32, length: 32 },
+  Outros: { type: 'caixa', weight: 300, height: 5, width: 20, length: 20 }
+};
+var ENVELOPE = { height: 2, width: 12, length: 17, maxHeight: 4 }; // medidas mínimas aceitas pelas transportadoras
+var SHIP_FINAL_STATUSES = ['Cancelado', 'Enviado', 'Entregue'];
+var SUPERFRETE_SERVICES = '1,2,17'; // PAC, SEDEX, Mini Envios
+
+function packageDefaults_(map) {
+  var out = {};
+  Object.keys(DEFAULT_PACKAGES).forEach(function (k) { out[k] = DEFAULT_PACKAGES[k]; });
+  try {
+    var saved = JSON.parse(str_((map || getConfigMap_()).packageDefaults) || '{}');
+    Object.keys(saved).forEach(function (k) {
+      var p = saved[k] || {};
+      var base = out[k] || DEFAULT_PACKAGES.Outros;
+      out[k] = { type: p.type === 'envelope' ? 'envelope' : p.type === 'caixa' ? 'caixa' : base.type,
+        weight: num_(p.weight) || base.weight, height: num_(p.height) || base.height,
+        width: num_(p.width) || base.width, length: num_(p.length) || base.length };
+    });
+  } catch (err) { /* JSON inválido: usa o padrão */ }
+  return out;
+}
+
+function shippingTokens_() {
+  var props = PropertiesService.getScriptProperties();
+  return { melhorEnvio: props.getProperty('MELHOR_ENVIO_TOKEN') || '', superFrete: props.getProperty('SUPERFRETE_TOKEN') || '' };
+}
+
+// Guarda a última falha de cada plataforma (para o painel mostrar quando um token vence)
+function recordShippingStatus_(key, error) {
+  var props = PropertiesService.getScriptProperties();
+  var prop = 'SHIPPING_STATUS_' + key;
+  var value = JSON.stringify({ error: error, at: new Date().toISOString() });
+  if (error || props.getProperty(prop)) props.setProperty(prop, value);
+}
+
+function shippingStatus_(key) {
+  try {
+    return JSON.parse(PropertiesService.getScriptProperties().getProperty('SHIPPING_STATUS_' + key) || 'null');
+  } catch (err) {
+    return null;
+  }
+}
+
+function shippingSettings_() {
+  var map = getConfigMap_();
+  var t = shippingTokens_();
+  return {
+    fromCep: str_(map.shippingFromCep).replace(/\D/g, ''),
+    contactEmail: str_(map.shippingContactEmail),
+    sandbox: str_(map.shippingSandbox).toUpperCase() === 'SIM',
+    dueDays: Math.max(0, Math.floor(num_(map.shippingDueDays) || 3)),
+    packageDefaults: packageDefaults_(map),
+    melhorEnvio: !!t.melhorEnvio,
+    superFrete: !!t.superFrete,
+    status: { melhorEnvio: shippingStatus_('melhorEnvio'), superFrete: shippingStatus_('superFrete') }
+  };
+}
+
+// ADM: cotação de teste para conferir tokens e CEP (sem cliente nem pedido)
+function actionAdminTestShippingQuote_(params) {
+  var cep = str_(params.cep).replace(/\D/g, '');
+  if (cep.length !== 8) throw userError_('Informe um CEP de destino válido.');
+  var cat = str_(params.category) || 'Photocards';
+  var defaults = packageDefaults_();
+  var d = defaults[cat] || defaults.Outros;
+  var pkg = d.type === 'envelope'
+    ? { kind: 'Envelope', weight: (d.weight + 10) / 1000, height: Math.max(ENVELOPE.height, d.height), width: ENVELOPE.width, length: ENVELOPE.length }
+    : { kind: 'Caixa', weight: (d.weight + 100) / 1000, height: d.height, width: d.width, length: d.length };
+  var q = quotesForPackage_(pkg, cep);
+  return { ok: true, options: q.options, errors: q.errors, package: pkg };
+}
+
+// --- Endereços da compradora
+function toAddress_(r) {
+  var v = r.v;
+  return { rowNumber: r.rowNumber, addressId: str_(v[0]), whatsapp: phone_(v[1]), label: str_(v[2]), recipient: str_(v[3]),
+    cep: str_(v[4]).replace(/\D/g, ''), street: str_(v[5]), number: str_(v[6]), complement: str_(v[7]), district: str_(v[8]),
+    city: str_(v[9]), state: str_(v[10]).toUpperCase(), createdAt: date_(v[11]) };
+}
+function addressRow_(a) {
+  return [a.addressId, a.whatsapp, a.label, a.recipient, a.cep, a.street, a.number, a.complement, a.district, a.city, a.state, dateCell_(a.createdAt)];
+}
+function addressesOf_(whatsapp) {
+  return readRows_('addresses').map(toAddress_).filter(function (a) { return a.whatsapp === whatsapp; });
+}
+function addressText_(a) {
+  return a.recipient + ' — ' + a.street + ', ' + a.number + (a.complement ? ' (' + a.complement + ')' : '') + ' — ' + a.district + ', ' +
+    a.city + '/' + a.state + ' — CEP ' + a.cep.slice(0, 5) + '-' + a.cep.slice(5);
+}
+
+function actionMyAddresses_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  return { ok: true, addresses: addressesOf_(client.whatsapp).map(strip_) };
+}
+
+function actionSaveAddress_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  var input = params.address || {};
+  var a = {
+    addressId: str_(input.addressId),
+    whatsapp: client.whatsapp,
+    label: str_(input.label).slice(0, 40) || 'Casa',
+    recipient: str_(input.recipient).slice(0, 80) || client.name,
+    cep: str_(input.cep).replace(/\D/g, ''),
+    street: str_(input.street).slice(0, 120),
+    number: str_(input.number).slice(0, 20),
+    complement: str_(input.complement).slice(0, 80),
+    district: str_(input.district).slice(0, 80),
+    city: str_(input.city).slice(0, 80),
+    state: str_(input.state).toUpperCase().slice(0, 2),
+    createdAt: new Date().toISOString()
+  };
+  if (a.cep.length !== 8) throw userError_('CEP inválido (8 números).');
+  if (!a.street || !a.number || !a.district || !a.city || a.state.length !== 2) {
+    throw userError_('Preencha rua, número, bairro, cidade e UF.');
+  }
+  var mine = addressesOf_(client.whatsapp);
+  if (a.addressId) {
+    var existing = mine.filter(function (x) { return x.addressId === a.addressId; })[0];
+    if (!existing) throw userError_('Endereço não encontrado.');
+    a.createdAt = existing.createdAt;
+    writeRow_('addresses', existing.rowNumber, addressRow_(a));
+  } else {
+    if (mine.length >= 5) throw userError_('Máximo de 5 endereços. Apague um para cadastrar outro.');
+    var ids = {};
+    readRows_('addresses').forEach(function (r) { ids[str_(r.v[0])] = true; });
+    a.addressId = newId_('END-', ids);
+    appendRow_('addresses', addressRow_(a));
+  }
+  return { ok: true, address: strip_(a), addresses: addressesOf_(client.whatsapp).map(strip_) };
+}
+
+function actionDeleteAddress_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  var a = addressesOf_(client.whatsapp).filter(function (x) { return x.addressId === str_(params.addressId); })[0];
+  if (!a) throw userError_('Endereço não encontrado.');
+  sheet_('addresses').deleteRow(a.rowNumber);
+  return { ok: true, addresses: addressesOf_(client.whatsapp).map(strip_) };
+}
+
+// --- Pacote
+// Só itens de envelope (photocards) → ENVELOPE fino. Com algum item de caixa (álbum,
+// DVD, vinil…) → CAIXA: empilha as alturas das caixas, usa a maior largura/comprimento
+// e os photocards vão dentro, somando só o peso.
+function buildPackage_(orders) {
+  var defaults = packageDefaults_();
+  var products = {};
+  allProducts_().forEach(function (p) { products[p.id] = p; });
+  var weight = 0, boxHeight = 0, envHeight = 0, width = 11, length = 16, hasBox = false;
+  orders.forEach(function (o) {
+    var cat = products[o.productId] ? products[o.productId].category : 'Outros';
+    var d = defaults[cat] || defaults.Outros;
+    weight += d.weight * o.quantity;
+    if (d.type === 'envelope') {
+      envHeight += d.height * o.quantity;
+    } else {
+      hasBox = true;
+      boxHeight += d.height * o.quantity;
+      width = Math.max(width, d.width);
+      length = Math.max(length, d.length);
+    }
+  });
+  var kg = Math.max(0.05, Math.round(weight + (hasBox ? 100 : 10)) / 1000); // + embalagem
+  if (!hasBox) {
+    var h = Math.max(ENVELOPE.height, Math.ceil(envHeight));
+    if (h <= ENVELOPE.maxHeight) {
+      return { kind: 'Envelope', weight: kg, height: h, width: ENVELOPE.width, length: ENVELOPE.length };
+    }
+    // muitos photocards: vira uma caixinha
+    return { kind: 'Caixa', weight: kg, height: Math.min(100, h), width: 12, length: 17 };
+  }
+  return { kind: 'Caixa', weight: kg, height: Math.min(100, Math.max(2, Math.ceil(boxHeight))), width: width, length: length };
+}
+
+function dims_(pkg) {
+  return { height: pkg.height, width: pkg.width, length: pkg.length, weight: pkg.weight };
+}
+
+function fetchJson_(url, token, payload, ua) {
+  var res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    headers: { Authorization: 'Bearer ' + token, Accept: 'application/json', 'User-Agent': ua },
+    muteHttpExceptions: true
+  });
+  var code = res.getResponseCode();
+  var body = res.getContentText();
+  var data = null;
+  try { data = JSON.parse(body); } catch (err) { /* resposta não-JSON */ }
+  if (code >= 300) throw new Error('HTTP ' + code + (data && data.message ? ' — ' + data.message : ''));
+  return data;
+}
+
+function melhorEnvioQuote_(token, from, to, pkg, settings, ua) {
+  var host = settings.sandbox ? 'https://sandbox.melhorenvio.com.br' : 'https://melhorenvio.com.br';
+  var data = fetchJson_(host + '/api/v2/me/shipment/calculate', token,
+    { from: { postal_code: from }, to: { postal_code: to }, package: dims_(pkg) }, ua);
+  return (Array.isArray(data) ? data : []).filter(function (s) { return !s.error && (s.custom_price || s.price); }).map(function (s) {
+    return { provider: 'Melhor Envio', serviceId: String(s.id), service: str_(s.name), company: s.company ? str_(s.company.name) : '',
+      logo: s.company ? str_(s.company.picture) : '', price: money_(s.custom_price || s.price),
+      days: Math.floor(num_(s.custom_delivery_time || s.delivery_time)) };
+  });
+}
+
+function superFreteQuote_(token, from, to, pkg, settings, ua) {
+  var host = settings.sandbox ? 'https://sandbox.superfrete.com' : 'https://api.superfrete.com';
+  var data = fetchJson_(host + '/api/v0/calculator', token, {
+    from: { postal_code: from }, to: { postal_code: to }, services: SUPERFRETE_SERVICES,
+    options: { own_hand: false, receipt: false, insurance_value: 0, use_insurance_value: false }, package: dims_(pkg)
+  }, ua);
+  return (Array.isArray(data) ? data : []).filter(function (s) { return !s.has_error && !s.error && s.price; }).map(function (s) {
+    return { provider: 'SuperFrete', serviceId: String(s.id), service: str_(s.name), company: s.company ? str_(s.company.name) : '',
+      logo: s.company ? str_(s.company.picture) : '', price: money_(s.price), days: Math.floor(num_(s.delivery_time)) };
+  });
+}
+
+// Cota nas plataformas configuradas. Falha de uma não impede a outra.
+function quotes_(orders, address) {
+  return quotesForPackage_(buildPackage_(orders), address.cep);
+}
+
+function quotesForPackage_(pkg, toCep) {
+  var address = { cep: toCep };
+  var settings = shippingSettings_();
+  var tokens = shippingTokens_();
+  var options = [];
+  var errors = [];
+  if (!settings.fromCep) errors.push('CEP de origem não configurado');
+  if (!tokens.melhorEnvio && !tokens.superFrete) errors.push('Nenhuma plataforma de frete configurada');
+  if (!errors.length) {
+    var ua = publicConfig_().storeName + ' (' + (settings.contactEmail || 'sem-email') + ')';
+    [['melhorEnvio', melhorEnvioQuote_], ['superFrete', superFreteQuote_]].forEach(function (pair) {
+      if (!tokens[pair[0]]) return;
+      var name = pair[0] === 'melhorEnvio' ? 'Melhor Envio' : 'SuperFrete';
+      try {
+        options = options.concat(pair[1](tokens[pair[0]], settings.fromCep, address.cep, pkg, settings, ua));
+        recordShippingStatus_(pair[0], '');
+      } catch (err) {
+        var msg = String(err.message || err).slice(0, 200);
+        if (/HTTP 401/.test(msg)) msg += ' (token inválido ou vencido — gere outro no painel da plataforma)';
+        errors.push(name + ': ' + msg);
+        recordShippingStatus_(pair[0], msg);
+      }
+    });
+  }
+  options.sort(function (a, b) { return a.price - b.price; });
+  options.forEach(function (o) { o.key = o.provider + ':' + o.serviceId; });
+  return { options: options, package: pkg, errors: errors };
+}
+
+function shippableOrders_(client, orderIds) {
+  var active = {};
+  allShipments_().forEach(function (s) {
+    if (s.status !== 'Cancelado') s.orderIds.forEach(function (id) { active[id] = s.shipmentId; });
+  });
+  var wanted = (orderIds || []).map(str_);
+  var orders = allOrders_().filter(function (o) { return wanted.indexOf(o.orderId) >= 0; });
+  if (!orders.length) throw userError_('Escolha os itens para enviar.');
+  orders.forEach(function (o) {
+    if (o.whatsapp !== client.whatsapp) throw userError_('Esse pedido não é seu.');
+    if (SHIP_FINAL_STATUSES.indexOf(o.status) >= 0) throw userError_('O item ' + o.productName + ' não pode mais ser enviado (' + o.status + ').');
+    if (active[o.orderId]) throw userError_('O item ' + o.productName + ' já está num pedido de envio (' + active[o.orderId] + ').');
+  });
+  return orders;
+}
+
+function myAddress_(client, addressId) {
+  var a = addressesOf_(client.whatsapp).filter(function (x) { return x.addressId === str_(addressId); })[0];
+  if (!a) throw userError_('Escolha um endereço.');
+  return a;
+}
+
+function actionQuoteShipping_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  var orders = shippableOrders_(client, params.orderIds);
+  var address = myAddress_(client, params.addressId);
+  var q = quotes_(orders, address);
+  return { ok: true, options: q.options, package: q.package, unavailable: !q.options.length,
+    message: q.options.length ? '' : 'Não deu para calcular o frete agora. Você pode pedir o envio assim mesmo: a loja calcula e te avisa o valor.' };
+}
+
+// --- Envios
+function toShipment_(r) {
+  var v = r.v;
+  return { rowNumber: r.rowNumber, shipmentId: str_(v[0]), createdAt: date_(v[1]), whatsapp: phone_(v[2]), name: str_(v[3]),
+    orderIds: str_(v[4]) ? str_(v[4]).split(/\s*,\s*/) : [], address: str_(v[5]), cep: str_(v[6]).replace(/\D/g, ''),
+    provider: str_(v[7]), service: str_(v[8]), price: money_(v[9]), days: Math.floor(num_(v[10])), status: str_(v[11]) || 'Aguardando cotação',
+    tracking: str_(v[12]), chargeId: str_(v[13]), package: str_(v[14]) };
+}
+function shipmentRow_(s) {
+  return [s.shipmentId, dateCell_(s.createdAt), s.whatsapp, s.name, s.orderIds.join(', '), s.address, s.cep, s.provider, s.service,
+    s.price || '', s.days || '', s.status, s.tracking || '', s.chargeId || '', s.package || ''];
+}
+function allShipments_() {
+  var charges = {};
+  allCharges_().forEach(function (c) { charges[c.chargeId] = c; });
+  return readRows_('shipments').map(toShipment_).map(function (s) {
+    var c = charges[s.chargeId];
+    s.paid = !!c && c.status === 'Pago';
+    s.chargeStatus = c ? c.status : '';
+    return s;
+  }).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; });
+}
+
+function shipmentCharge_(s, orders, price) {
+  var settings = shippingSettings_();
+  var first = orders[0];
+  var due = addDaysKey_(dateKey_(new Date()), settings.dueDays);
+  var label = 'Frete nacional — ' + (s.service || 'envio') + ' (' + orders.length + ' item' + (orders.length > 1 ? 's' : '') + ', ' + s.shipmentId + ')';
+  return newCharge_(first, label.slice(0, 120), price, chargeIds_(), due);
+}
+
+function actionRequestShipping_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  var orders = shippableOrders_(client, params.orderIds);
+  var address = myAddress_(client, params.addressId);
+  var chosen = null;
+  var pkg = buildPackage_(orders);
+  if (params.optionKey) {
+    var q = quotes_(orders, address); // recalcula no servidor: o preço não vem do navegador
+    chosen = q.options.filter(function (o) { return o.key === str_(params.optionKey); })[0];
+    if (!chosen) throw userError_('Essa opção de frete não está mais disponível. Calcule de novo.');
+    pkg = q.package;
+  }
+  var ids = {};
+  readRows_('shipments').forEach(function (r) { ids[str_(r.v[0])] = true; });
+  var s = {
+    shipmentId: newId_('ENV-', ids), createdAt: new Date().toISOString(), whatsapp: client.whatsapp, name: client.name,
+    orderIds: orders.map(function (o) { return o.orderId; }), address: addressText_(address), cep: address.cep,
+    provider: chosen ? chosen.provider : '', service: chosen ? (chosen.company ? chosen.company + ' ' : '') + chosen.service : '',
+    price: chosen ? chosen.price : 0, days: chosen ? chosen.days : 0, status: chosen ? 'Aguardando pagamento' : 'Aguardando cotação',
+    tracking: '', chargeId: '', package: pkg.kind + ' — ' + pkg.weight + ' kg, ' + pkg.height + 'x' + pkg.width + 'x' + pkg.length + ' cm'
+  };
+  if (chosen) s.chargeId = shipmentCharge_(s, orders, chosen.price).chargeId;
+  appendRow_('shipments', shipmentRow_(s));
+  orders.forEach(function (o) {
+    addHistory_(o, 'envio pedido (' + s.shipmentId + ')' + (chosen ? ': ' + s.service + ' ' + brl_(s.price) : ', aguardando cotação'));
+    writeRow_('orders', o.rowNumber, orderRow_(o));
+  });
+  return { ok: true, shipment: strip_(s) };
+}
+
+// ADM: valor do frete quando não houve cotação automática (ou para corrigir)
+function actionAdminSetShippingPrice_(params) {
+  var s = allShipments_().filter(function (x) { return x.shipmentId === str_(params.shipmentId); })[0];
+  if (!s) throw userError_('Envio não encontrado.');
+  var price = money_(params.price);
+  if (price <= 0) throw userError_('Informe o valor do frete.');
+  if (str_(params.service)) s.service = str_(params.service).slice(0, 80);
+  if (params.days !== undefined && params.days !== '') s.days = Math.floor(num_(params.days));
+  var orders = allOrders_().filter(function (o) { return s.orderIds.indexOf(o.orderId) >= 0; });
+  if (s.chargeId) {
+    var c = findCharge_(s.chargeId);
+    if (c.status === 'Pago') throw userError_('Esse frete já foi pago.');
+    c.amount = price;
+    writeRow_('charges', c.rowNumber, chargeRow_(c));
+  } else {
+    if (!orders.length) throw userError_('Os pedidos desse envio não existem mais.');
+    s.chargeId = shipmentCharge_(s, orders, price).chargeId;
+  }
+  s.price = price;
+  if (s.status === 'Aguardando cotação') s.status = 'Aguardando pagamento';
+  writeRow_('shipments', s.rowNumber, shipmentRow_(s));
+  var text = 'Oii ' + s.name.split(' ')[0] + '! 💜 O frete do seu envio ' + s.shipmentId + ' ficou em *' + brl_(price) + '*' +
+    (s.service ? ' (' + s.service + ')' : '') + '. Já está em "Meus Pedidos" para pagar.';
+  return { ok: true, shipment: strip_(s), notifyLink: waUrl_(s.whatsapp, text) };
+}
+
+function actionAdminMarkShipped_(params) {
+  var s = allShipments_().filter(function (x) { return x.shipmentId === str_(params.shipmentId); })[0];
+  if (!s) throw userError_('Envio não encontrado.');
+  var tracking = str_(params.tracking).slice(0, 60);
+  s.status = 'Enviado';
+  s.tracking = tracking;
+  writeRow_('shipments', s.rowNumber, shipmentRow_(s));
+  allOrders_().forEach(function (o) {
+    if (s.orderIds.indexOf(o.orderId) < 0) return;
+    o.status = 'Enviado';
+    if (tracking) o.note = 'Rastreio: ' + tracking;
+    addHistory_(o, 'enviado (' + s.shipmentId + ')' + (tracking ? ' — rastreio ' + tracking : ''));
+    writeRow_('orders', o.rowNumber, orderRow_(o));
+  });
+  var text = 'Oii ' + s.name.split(' ')[0] + '! 💜 Seu pacote foi enviado' + (s.service ? ' por ' + s.service : '') + '! 📦' +
+    (tracking ? '\nCódigo de rastreio: *' + tracking + '*' : '') + '\nItens: ' + s.orderIds.length + ' • ' + s.shipmentId;
+  return { ok: true, notifyLink: waUrl_(s.whatsapp, text) };
+}
+
+function actionAdminSaveShippingSettings_(params) {
+  var input = params.settings || {};
+  var rows = readRows_('config');
+  var set = function (key, value) {
+    var row = rows.filter(function (r) { return str_(r.v[0]) === key; })[0];
+    if (row) writeRow_('config', row.rowNumber, [key, value, str_(row.v[2])]);
+    else appendRow_('config', [key, value, '']);
+  };
+  if (input.fromCep !== undefined) {
+    var cep = str_(input.fromCep).replace(/\D/g, '');
+    if (cep && cep.length !== 8) throw userError_('CEP de origem inválido.');
+    set('shippingFromCep', cep);
+  }
+  if (input.contactEmail !== undefined) set('shippingContactEmail', str_(input.contactEmail).slice(0, 120));
+  if (input.sandbox !== undefined) set('shippingSandbox', input.sandbox ? 'SIM' : 'NÃO');
+  if (input.dueDays !== undefined) set('shippingDueDays', String(Math.max(0, Math.min(30, Math.floor(num_(input.dueDays)) || 0))));
+  if (input.packageDefaults) set('packageDefaults', JSON.stringify(input.packageDefaults).slice(0, 2000));
+  var props = PropertiesService.getScriptProperties();
+  if (str_(input.melhorEnvioToken)) props.setProperty('MELHOR_ENVIO_TOKEN', str_(input.melhorEnvioToken));
+  if (str_(input.superFreteToken)) props.setProperty('SUPERFRETE_TOKEN', str_(input.superFreteToken));
+  if (input.removeMelhorEnvio) props.deleteProperty('MELHOR_ENVIO_TOKEN');
+  if (input.removeSuperFrete) props.deleteProperty('SUPERFRETE_TOKEN');
+  return { ok: true, shipping: shippingSettings_() };
 }

@@ -325,3 +325,9 @@ export const matchesSearch = (query, text, phones = []) => {
   if (digits.length > 11 && digits.startsWith('55')) digits = digits.slice(2);
   return phones.some((p) => String(p || '').replace(/\D/g, '').includes(digits));
 };
+
+export const addDaysKey = (key, days) => {
+  const [y, m, d] = key.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+};
