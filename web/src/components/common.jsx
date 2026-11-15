@@ -183,8 +183,9 @@ export function PhoneInput({ value, onChange, ...props }) {
   const handle = (e) => {
     const raw = e.target.value;
     let digits = phoneDigits(raw);
-    // apagou um "(", ")", " " ou "-": apaga o número antes dele
-    if (raw.length < shown.length && digits === phoneDigits(shown)) digits = digits.slice(0, -1);
+    // apagou só um "(", ")", " " ou "-" com o backspace: apaga o número antes dele.
+    // (colar/autopreencher o mesmo número sem formatação não entra aqui)
+    if (raw.length === shown.length - 1 && digits === phoneDigits(shown)) digits = digits.slice(0, -1);
     onChange({ target: { value: formatPhoneTyping(digits) } });
   };
   return (
