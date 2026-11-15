@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
 import {
-  CATEGORIES, DEFAULT_GROUP, GROUPS, GROUP_NAMES, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone, groupOf, membersOf,
+  CATEGORIES, DEFAULT_GROUP, phoneConflicts, GROUPS, GROUP_NAMES, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone, groupOf, membersOf,
   wholeGroupLabel,
   formatDay, formatDayShort, isAlbumLink, isOverdue, memberBadgeColor, orderStatusColor, splitInstallments, waLink
 } from '../utils';
@@ -28,6 +28,7 @@ export default function Admin({ showToast, onCatalogChange }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState('orders');
+  const [ordersQuery, setOrdersQuery] = useState({ text: '', n: 0 }); // busca vinda de outra aba
 
   const logout = useCallback(() => {
     writePass('');
@@ -85,11 +86,13 @@ export default function Admin({ showToast, onCatalogChange }) {
   const today = data.config.today || '';
   const dueNow = data.charges.filter((c) => c.status === 'Pendente' && c.dueDate && today && c.dueDate <= today).length;
 
+  const conflicts = phoneConflicts(data.orders, data.clients).filter((c) => c.severity === 'diferente').length;
+
   const tabs = [
     ['orders', ReceiptText, `Pedidos (${data.orders.length})`],
     ['reminders', BellRing, `Cobranças do dia${dueNow ? ` (${dueNow})` : ''}`],
     ['sale', ShoppingCart, 'Registrar venda'],
-    ['buyers', Users, 'Compradoras'],
+    ['buyers', Users, `Compradoras${conflicts ? ` ⚠️${conflicts}` : ''}`],
     ['products', Package, `Produtos (${data.products.length})`],
     ['batch', Truck, 'Cobrar frete do lote'],
     ['settings', Settings, 'Configurações']
@@ -126,8 +129,17 @@ export default function Admin({ showToast, onCatalogChange }) {
         </div>
       </div>
 
-      {tab === 'orders' && <OrdersTab data={data} run={run} />}
-      {tab === 'buyers' && <BuyersTab data={data} run={run} />}
+      {tab === 'orders' && <OrdersTab key={ordersQuery.n} data={data} run={run} initialQuery={ordersQuery.text} />}
+      {tab === 'buyers' && (
+        <BuyersTab
+          data={data}
+          run={run}
+          onShowOrders={(text) => {
+            setOrdersQuery((q) => ({ text, n: q.n + 1 }));
+            setTab('orders');
+          }}
+        />
+      )}
       {tab === 'sale' && <SaleTab data={data} run={run} />}
       {tab === 'reminders' && <RemindersTab call={call} run={run} showToast={showToast} />}
       {tab === 'products' && <ProductsTab data={data} run={run} />}
@@ -207,8 +219,8 @@ function Stats({ data }) {
 
 // ---------------------------------------------------------------------------
 
-function OrdersTab({ data, run }) {
-  const [query, setQuery] = useState('');
+function OrdersTab({ data, run, initialQuery = '' }) {
+  const [query, setQuery] = useState(initialQuery);
   const [batch, setBatch] = useState('');
   const [status, setStatus] = useState('');
   const [onlyOwing, setOnlyOwing] = useState(false);
@@ -538,7 +550,7 @@ function TransferBox({ order, charges, run, onTransferred }) {
 
 // ---------------------------------------------------------------------------
 
-function BuyersTab({ data, run }) {
+function BuyersTab({ data, run, onShowOrders }) {
   const [onlyOwing, setOnlyOwing] = useState(true);
   const [temp, setTemp] = useState(null);
   const accounts = useMemo(() => {
@@ -585,6 +597,8 @@ function BuyersTab({ data, run }) {
   };
 
   return (
+    <div className="space-y-4">
+    <PhoneConflicts data={data} onShowOrders={onShowOrders} />
     <div className="card overflow-hidden">
       <div className="p-4 flex flex-wrap gap-3 items-center border-b border-purple-50">
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar compradora..." className="input flex-1 min-w-[200px]" />
@@ -644,11 +658,62 @@ function BuyersTab({ data, run }) {
         ))}
       </div>
     </div>
+    </div>
+  );
+}
+
+// Telefones usados por pessoas com nomes diferentes: uma vê os pedidos da outra
+function PhoneConflicts({ data, onShowOrders }) {
+  const [showSimilar, setShowSimilar] = useState(false);
+  const all = phoneConflicts(data.orders, data.clients);
+  const list = all.filter((c) => showSimilar || c.severity === 'diferente');
+  const similar = all.length - all.filter((c) => c.severity === 'diferente').length;
+  if (!all.length) {
+    return (
+      <div className="card p-4 text-sm text-emerald-800 bg-emerald-50 border-emerald-200">
+        ✓ Nenhum WhatsApp está sendo usado por pessoas com nomes diferentes.
+      </div>
+    );
+  }
+  return (
+    <div className="card p-4 space-y-3 border-amber-200">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="font-extrabold text-slate-800">⚠️ Mesmo WhatsApp com nomes diferentes</h3>
+          <p className="text-xs text-slate-500">
+            Quem entra com esse WhatsApp vê os pedidos de todos os nomes abaixo. Abra os pedidos e use
+            "Repassar para outra pessoa / corrigir compradora" para colocar o WhatsApp certo de cada uma.
+          </p>
+        </div>
+        {similar > 0 && (
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+            <input type="checkbox" checked={showSimilar} onChange={(e) => setShowSimilar(e.target.checked)} className="w-4 h-4 accent-purple-600" />
+            Mostrar também nomes parecidos ({similar}) — ex.: Soraya/Soraia
+          </label>
+        )}
+      </div>
+      {list.length === 0 && <p className="text-sm text-emerald-700">✓ Só há variações de escrita do mesmo nome.</p>}
+      {list.map((c) => (
+        <div key={c.whatsapp} className={`rounded-xl border p-3 flex flex-wrap items-center justify-between gap-2 ${c.severity === 'diferente' ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+          <div className="text-sm">
+            <strong>{formatPhone(c.whatsapp)}</strong>{' '}
+            <Badge className={c.severity === 'diferente' ? 'bg-rose-100 text-rose-700 border-rose-200' : 'bg-slate-100 text-slate-600 border-slate-200'}>
+              {c.severity === 'diferente' ? 'pessoas diferentes?' : 'nome parecido'}
+            </Badge>
+            <span className="block text-xs text-slate-600 mt-1">
+              {c.names.map((n) => `${n.name} (${n.count} pedido${n.count === 1 ? '' : 's'}${n.account ? ', tem conta' : ''})`).join(' • ')}
+            </span>
+          </div>
+          <button type="button" onClick={() => onShowOrders(c.whatsapp)} className="btn-soft">
+            Ver os {c.orders.length} pedidos
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-
 
 const EMPTY_PRODUCT = {
   id: '', name: '', group: DEFAULT_GROUP, member: 'OT7', category: 'Photocards', price: '', totalStock: 1, image: '', batch: '', active: true,

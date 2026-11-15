@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { CheckCircle2, Phone, ShoppingCart } from 'lucide-react';
 import {
-  CATEGORIES, DEFAULT_GROUP, GROUPS, GROUP_NAMES, formatBRL, formatDay, formatPhone, groupOf, membersOf,
+  CATEGORIES, DEFAULT_GROUP, GROUPS, GROUP_NAMES, formatBRL, formatDay, formatPhone, groupOf, membersOf, sameFirstName,
   splitInstallments, todayKey, waLink, wholeGroupLabel
 } from '../utils';
 import { DateListInput, ProductImage, Spinner } from './common';
@@ -34,6 +34,8 @@ export default function SaleTab({ data, run }) {
     setForm(b ? { ...form, name: b.name, contact: b.contact, whatsapp: b.whatsapp } : { ...form, name: value });
   };
 
+  const typedPhone = form.whatsapp.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+  const owner = typedPhone.length >= 10 ? buyers.find((b) => b.whatsapp === typedPhone) : null;
   const product = data.products.find((p) => p.id === form.productId);
   const group = form.group.trim();
   const known = !form.otherGroup && !!GROUPS[group];
@@ -104,6 +106,12 @@ export default function SaleTab({ data, run }) {
             </div>
           </div>
           {!form.whatsapp && <p className="text-[11px] text-amber-700">Sem WhatsApp a cliente não consegue ver o pedido em "Meus Pedidos".</p>}
+          {owner && form.name && !sameFirstName(owner.name, form.name) && (
+            <p className="text-xs font-semibold text-rose-700 bg-rose-50 rounded-xl px-3 py-2">
+              ⚠️ Esse WhatsApp já é de <strong>{owner.name}</strong>. Se a venda é de outra pessoa, use o WhatsApp dela — senão as duas
+              vão ver os pedidos uma da outra.
+            </p>
+          )}
         </Section>
 
         <Section title="2. Produto">
