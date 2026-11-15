@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
 import {
-  CATEGORIES, DEFAULT_GROUP, phoneConflicts, detectMembers, GROUPS, GROUP_NAMES, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone, groupOf, membersOf,
+  CATEGORIES, DEFAULT_GROUP, phoneConflicts, detectMembers, matchesSearch, GROUPS, GROUP_NAMES, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone, groupOf, membersOf,
   wholeGroupLabel,
   formatDay, formatDayShort, isAlbumLink, isOverdue, memberBadgeColor, orderStatusColor, splitInstallments, waLink
 } from '../utils';
@@ -248,7 +248,7 @@ function OrdersTab({ data, run, initialQuery = '' }) {
     const q = query.toLowerCase().trim();
     const owed = sumBy(chargesByOrder[o.orderId] || [], 'Pendente');
     return (
-      (!q || `${o.orderId} ${o.buyerName} ${o.contact} ${o.whatsapp} ${o.productName} ${o.productId}`.toLowerCase().includes(q)) &&
+      matchesSearch(q, `${o.orderId} ${o.buyerName} ${o.contact} ${o.productName} ${o.productId}`, [o.whatsapp]) &&
       (!batch || o.batch === batch) &&
       (!status || o.status === status) &&
       (!onlyOwing || owed > 0) &&
@@ -703,7 +703,7 @@ function BuyersTab({ data, run, call, reload, showToast, onShowOrders }) {
   }, [data.orders, data.clients, chargesByOrder]);
 
   const q = query.toLowerCase().trim();
-  const list = buyers.filter((b) => (!onlyOwing || b.owed > 0) && (!q || `${b.name} ${b.contact} ${b.whatsapp}`.toLowerCase().includes(q)));
+  const list = buyers.filter((b) => (!onlyOwing || b.owed > 0) && matchesSearch(q, `${b.name} ${b.contact}`, [b.whatsapp]));
 
   const reminder = (b) =>
     `Oii ${b.name.split(' ')[0]}! 💜 Passando para lembrar dos pagamentos pendentes da CEG:\n\n` +
