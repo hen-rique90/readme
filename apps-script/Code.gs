@@ -18,7 +18,8 @@ var SHEETS = {
   products: 'Produtos',
   orders: 'Pedidos',
   charges: 'Cobranças',
-  clients: 'Clientes'
+  clients: 'Clientes',
+  requests: 'Solicitações'
 };
 
 var HEADERS = {
@@ -27,7 +28,9 @@ var HEADERS = {
   orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento', 'Obs. da compradora',
     'Repasse: nome', 'Repasse: WhatsApp', 'Repasse: @', 'Histórico', 'Forma de pagamento', 'Foto'],
   charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento', 'Último lembrete'],
-  clients: ['WhatsApp', 'Nome', '@ (Insta/Twitter)', 'Senha (protegida)', 'Sal', 'Criada em', 'Último acesso', 'Trocar senha']
+  clients: ['WhatsApp', 'Nome', '@ (Insta/Twitter)', 'Senha (protegida)', 'Sal', 'Criada em', 'Último acesso', 'Trocar senha'],
+  requests: ['ID', 'Data', 'Tipo', 'ID Pedido', 'Cobranças', 'WhatsApp', 'Nome', 'Mensagem', 'Nova data pedida', 'Status',
+    'Resposta da loja', 'Respondida em', 'Data aprovada']
 };
 
 // Colunas que precisam ser texto puro (evita o Sheets transformar telefone em número)
@@ -36,7 +39,8 @@ var TEXT_COLUMNS = {
   products: [1, 10, 11],
   orders: [1, 3, 9],
   charges: [1, 2, 3, 9],
-  clients: [1, 4, 5]
+  clients: [1, 4, 5],
+  requests: [1, 4, 5, 6, 9, 13]
 };
 
 var DEFAULT_CONFIG = [
@@ -60,7 +64,7 @@ var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'no
 var ORDER_STATUSES = ['Reservado', 'Comprado', 'A caminho do Brasil', 'Chegou (na bag)', 'Enviado', 'Entregue', 'Cancelado'];
 var CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 var SHIPPING_OPTIONS = ['Guardar na bag', 'Enviar assim que chegar'];
-var SCHEMA_VERSION = '9';
+var SCHEMA_VERSION = '10';
 var PAYMENT_METHODS = ['Pix', 'Cartão de crédito'];
 var DEFAULT_GROUP = 'BTS'; // produtos antigos, sem grupo, eram todos de BTS
 var SHIPPING_COST_OPTIONS = ['Frete incluso', 'Frete não incluso'];
@@ -101,7 +105,10 @@ var PUBLIC_ACTIONS = {
   updateMyOrder: actionUpdateMyOrder_,
   cancelMyOrder: actionCancelMyOrder_,
   requestTransfer: actionRequestTransfer_,
-  cancelTransferRequest: actionCancelTransferRequest_
+  cancelTransferRequest: actionCancelTransferRequest_,
+  requestCorrection: actionRequestCorrection_,
+  requestExtension: actionRequestExtension_,
+  cancelMyRequest: actionCancelMyRequest_
 };
 
 var ADMIN_ACTIONS = {
@@ -129,7 +136,8 @@ var ADMIN_ACTIONS = {
   adminDeleteAccount: actionAdminDeleteAccount_,
   adminUpdateCharge: actionAdminUpdateCharge_,
   adminUpdateOrder: actionAdminUpdateOrder_,
-  adminSplitOrder: actionAdminSplitOrder_
+  adminSplitOrder: actionAdminSplitOrder_,
+  adminAnswerRequest: actionAdminAnswerRequest_
 };
 
 // Ações que alteram a planilha e precisam da trava
@@ -139,7 +147,8 @@ var WRITE_ACTIONS = {
   register: true, login: true, updateProfile: true, changePassword: true, updateMyOrder: true, cancelMyOrder: true,
   adminResetPassword: true, adminCreateSale: true, adminTransferOrder: true, adminApproveTransfer: true,
   adminRejectTransfer: true, requestTransfer: true, cancelTransferRequest: true, adminMarkReminded: true,
-  adminUpdateBuyer: true, adminDeleteAccount: true, adminUpdateCharge: true, adminUpdateOrder: true, adminSplitOrder: true
+  adminUpdateBuyer: true, adminDeleteAccount: true, adminUpdateCharge: true, adminUpdateOrder: true, adminSplitOrder: true,
+  requestCorrection: true, requestExtension: true, cancelMyRequest: true, adminAnswerRequest: true
 };
 
 function handle_(action, params) {
@@ -652,11 +661,13 @@ function actionMyOrders_(params) {
   var charges = allCharges_().filter(function (c) { return orderIds[c.orderId]; });
   var products = {};
   allProducts_().forEach(function (p) { products[p.id] = p; });
+  var requests = allRequests_().filter(function (r) { return orderIds[r.orderId]; });
 
   var orders = mine.map(function (o) {
     var out = strip_(o);
     out.image = o.image || (products[o.productId] ? products[o.productId].image : '');
     out.charges = charges.filter(function (c) { return c.orderId === o.orderId; }).map(strip_);
+    out.requests = requests.filter(function (r) { return r.orderId === o.orderId; }).map(strip_);
     return out;
   }).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; });
 
@@ -695,6 +706,7 @@ function actionAdminData_() {
     products: allProducts_().map(function (p) { return withAvailability_(p, sold); }),
     orders: orders.map(strip_).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; }),
     charges: allCharges_().map(strip_),
+    requests: allRequests_().map(strip_),
     clients: readRows_('clients').map(toClient_).map(function (c) {
       return { whatsapp: c.whatsapp, name: c.name, contact: c.contact, createdAt: c.createdAt, lastLogin: c.lastLogin, mustChange: c.mustChange };
     })
@@ -1569,6 +1581,16 @@ function digestHtml_(r, config) {
         '</div>';
     });
   });
+  if (r.requests && r.requests.length) {
+    html += '<h3 style="margin:20px 0 8px">📨 Solicitações das clientes esperando resposta (' + r.requests.length + ')</h3>';
+    r.requests.forEach(function (q) {
+      html += '<div style="border:1px solid #fde68a;border-radius:12px;padding:10px 12px;margin:8px 0;font-size:13px">' +
+        '<b>' + esc(q.type) + '</b> — ' + esc(q.name) + ' — pedido ' + esc(q.orderId) +
+        (q.requestedDate ? ' — pede prazo até <b>' + dateText_(q.requestedDate) + '</b>' : '') +
+        (q.message ? '<br><i>"' + esc(q.message) + '"</i>' : '') + '</div>';
+    });
+    html += '<p style="font-size:12px;color:#64748b">Responda em ADM → Solicitações.</p>';
+  }
   if (r.cards.length) {
     html += '<h3 style="margin:20px 0 8px">💳 Escolheram cartão — enviar link (' + r.cards.length + ')</h3>';
     r.cards.forEach(function (c) {
@@ -1588,11 +1610,13 @@ function sendDigest_(force) {
   if (!to) throw userError_('Cadastre o e-mail do resumo em ADM → Configurações.');
   var config = publicConfig_();
   var r = reminderGroups_();
-  var empty = !r.groups.length && !r.cards.length;
+  r.requests = allRequests_().filter(function (q) { return q.status === 'Pendente'; });
+  var empty = !r.groups.length && !r.cards.length && !r.requests.length;
   if (empty && !force) return { sent: false, groups: 0 };
   var count = function (k) { return r.groups.filter(function (g) { return g.kind === k; }).length; };
   var subject = config.storeName + ' — cobranças de ' + dateText_(r.today) + ': ' + count('overdue') + ' vencida(s), ' +
-    count('today') + ' hoje, ' + count('soon') + ' em breve' + (r.cards.length ? ', ' + r.cards.length + ' cartão' : '');
+    count('today') + ' hoje, ' + count('soon') + ' em breve' + (r.cards.length ? ', ' + r.cards.length + ' cartão' : '') +
+    (r.requests.length ? ', ' + r.requests.length + ' solicitação(ões)' : '');
   var html = empty ? '<p>Nenhuma cobrança vencida ou vencendo nos próximos dias. 🎉 (e-mail de teste)</p>' : digestHtml_(r, config);
   MailApp.sendEmail({ to: to, subject: subject, htmlBody: html, name: config.storeName });
   return { sent: true, groups: r.groups.length, cards: r.cards.length, to: to };
@@ -1895,4 +1919,155 @@ function actionAdminSplitOrder_(params) {
     created.push(copy);
   });
   return { ok: true, orders: created };
+}
+
+
+// ----------------------------------------------------------------------------
+// SOLICITAÇÕES DAS CLIENTES: correção e prorrogação de pagamento
+// ----------------------------------------------------------------------------
+var REQUEST_TYPES = { correction: 'Correção', extension: 'Prorrogação' };
+
+function toRequest_(r) {
+  var v = r.v;
+  return {
+    rowNumber: r.rowNumber,
+    requestId: str_(v[0]),
+    createdAt: date_(v[1]),
+    type: str_(v[2]),
+    orderId: str_(v[3]),
+    chargeIds: str_(v[4]) ? str_(v[4]).split(/\s*,\s*/) : [],
+    whatsapp: phone_(v[5]),
+    name: str_(v[6]),
+    message: str_(v[7]),
+    requestedDate: dateKey_(v[8]),
+    status: str_(v[9]) || 'Pendente',
+    reply: str_(v[10]),
+    answeredAt: date_(v[11]),
+    approvedDate: dateKey_(v[12])
+  };
+}
+
+function requestRow_(q) {
+  return [q.requestId, dateCell_(q.createdAt), q.type, q.orderId, (q.chargeIds || []).join(', '), q.whatsapp, q.name, q.message,
+    dateText_(q.requestedDate), q.status, q.reply || '', dateCell_(q.answeredAt), dateText_(q.approvedDate)];
+}
+
+function allRequests_() {
+  return readRows_('requests').map(toRequest_).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; });
+}
+
+function newRequest_(order, type, message, chargeIds, requestedDate) {
+  var ids = {};
+  allRequests_().forEach(function (q) { ids[q.requestId] = true; });
+  var q = {
+    requestId: newId_('SOL-', ids),
+    createdAt: new Date().toISOString(),
+    type: type,
+    orderId: order.orderId,
+    chargeIds: chargeIds || [],
+    whatsapp: order.whatsapp,
+    name: order.buyerName,
+    message: message,
+    requestedDate: requestedDate || '',
+    status: 'Pendente',
+    reply: '',
+    answeredAt: '',
+    approvedDate: ''
+  };
+  appendRow_('requests', requestRow_(q));
+  return q;
+}
+
+function pendingOf_(orderId, type) {
+  return allRequests_().some(function (q) { return q.orderId === orderId && q.type === type && q.status === 'Pendente'; });
+}
+
+// A cliente (logada) conta o que está errado no pedido
+function actionRequestCorrection_(params) {
+  var order = myOrder_(params);
+  var message = str_(params.message).replace(/\s+/g, ' ').slice(0, 500);
+  if (message.length < 5) throw userError_('Conte o que está errado (pelo menos algumas palavras).');
+  if (pendingOf_(order.orderId, REQUEST_TYPES.correction)) throw userError_('Já existe um pedido de correção esperando a loja para esse item.');
+  var q = newRequest_(order, REQUEST_TYPES.correction, message, [], '');
+  return { ok: true, request: strip_(q) };
+}
+
+// A cliente (logada) pede mais prazo para as cobranças pendentes do pedido
+function actionRequestExtension_(params) {
+  var order = myOrder_(params);
+  if (order.status === 'Cancelado') throw userError_('Esse pedido está cancelado.');
+  var pending = orderCharges_(order).filter(function (c) { return c.status === 'Pendente'; });
+  var wanted = params.chargeIds && params.chargeIds.length ? params.chargeIds.map(str_) : pending.map(function (c) { return c.chargeId; });
+  var chosen = pending.filter(function (c) { return wanted.indexOf(c.chargeId) >= 0; });
+  if (!chosen.length) throw userError_('Esse pedido não tem pagamento pendente.');
+  var date = dateKey_(params.newDate);
+  var today = dateKey_(new Date());
+  if (!date) throw userError_('Escolha até quando você pode pagar.');
+  if (date <= today) throw userError_('A nova data precisa ser depois de hoje.');
+  if (date > addDaysKey_(today, 180)) throw userError_('Escolha uma data nos próximos 6 meses.');
+  if (pendingOf_(order.orderId, REQUEST_TYPES.extension)) throw userError_('Já existe um pedido de prorrogação esperando a loja para esse item.');
+  var message = str_(params.message).replace(/\s+/g, ' ').slice(0, 500);
+  var q = newRequest_(order, REQUEST_TYPES.extension, message, chosen.map(function (c) { return c.chargeId; }), date);
+  return { ok: true, request: strip_(q) };
+}
+
+function actionCancelMyRequest_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  var q = null;
+  allRequests_().forEach(function (r) { if (r.requestId === str_(params.requestId)) q = r; });
+  if (!q || q.whatsapp !== client.whatsapp) throw userError_('Solicitação não encontrada.');
+  if (q.status !== 'Pendente') throw userError_('A loja já respondeu essa solicitação.');
+  q.status = 'Cancelada';
+  q.answeredAt = new Date().toISOString();
+  writeRow_('requests', q.rowNumber, requestRow_(q));
+  return { ok: true };
+}
+
+// ADM responde: aceitar/recusar prorrogação (pode mudar a data) ou resolver/recusar correção
+function actionAdminAnswerRequest_(params) {
+  var q = null;
+  allRequests_().forEach(function (r) { if (r.requestId === str_(params.requestId)) q = r; });
+  if (!q) throw userError_('Solicitação não encontrada.');
+  if (q.status !== 'Pendente') throw userError_('Essa solicitação já foi respondida.');
+  var decision = str_(params.decision);
+  var reply = str_(params.reply).replace(/\s+/g, ' ').slice(0, 500);
+  var order = findOrder_(q.orderId);
+  var config = publicConfig_();
+  var first = q.name.split(' ')[0];
+  var text;
+
+  if (q.type === REQUEST_TYPES.extension && decision === 'accept') {
+    var date = dateKey_(params.date || q.requestedDate);
+    if (!date) throw userError_('Escolha a nova data.');
+    var changed = 0;
+    orderCharges_(order).forEach(function (c) {
+      if (q.chargeIds.indexOf(c.chargeId) < 0 || c.status !== 'Pendente') return;
+      c.dueDate = date;
+      writeRow_('charges', c.rowNumber, chargeRow_(c));
+      changed++;
+    });
+    q.status = 'Aceita';
+    q.approvedDate = date;
+    addHistory_(order, 'prorrogação aceita até ' + dateText_(date) + (changed ? '' : ' (sem cobranças pendentes)'));
+    writeRow_('orders', order.rowNumber, orderRow_(order));
+    text = 'Oii ' + first + '! 💜 Sua prorrogação do pedido ' + order.orderId + ' (' + order.productName + ') foi *aceita*: o novo prazo é *' +
+      dateText_(date) + '*.' + (reply ? '\n' + reply : '') + '\nVocê vê tudo em "Meus Pedidos" no site.';
+  } else if (q.type === REQUEST_TYPES.correction && decision === 'resolve') {
+    q.status = 'Resolvida';
+    addHistory_(order, 'correção resolvida pela loja');
+    writeRow_('orders', order.rowNumber, orderRow_(order));
+    text = 'Oii ' + first + '! 💜 Sobre a correção que você pediu no pedido ' + order.orderId + ' (' + order.productName + '): ' +
+      (reply || 'já ajustamos!') + '\nConfere em "Meus Pedidos" no site.';
+  } else if (decision === 'reject') {
+    q.status = 'Recusada';
+    text = 'Oii ' + first + '! 💜 Sobre o seu pedido de ' + q.type.toLowerCase() + ' no pedido ' + order.orderId + ' (' + order.productName +
+      '): ' + (reply || 'não conseguimos atender dessa vez.') + (q.type === REQUEST_TYPES.extension ? '\nO prazo continua o mesmo.' : '');
+  } else {
+    throw userError_('Resposta inválida.');
+  }
+  q.reply = reply;
+  q.answeredAt = new Date().toISOString();
+  writeRow_('requests', q.rowNumber, requestRow_(q));
+  return { ok: true, request: strip_(q), notifyLink: waUrl_(q.whatsapp, text), storeName: config.storeName };
 }
