@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronRight, Filter, Package, RefreshCw, Search, Sparkles } from 'lucide-react';
 import { CATEGORIES, MEMBERS, formatBRL, formatDay, memberBadgeColor, splitInstallments } from '../utils';
-import { ProductImage, Spinner } from './common';
+import { ProductImage, ProductTags, Spinner } from './common';
 
 export default function Catalog({ products, config, loading, error, session, busyId, onRefresh, onClaim }) {
   const [category, setCategory] = useState('Todos');
@@ -198,6 +198,7 @@ function ProductCard({ product: p, canClaim, loggedIn, busy, onClaim }) {
             <span className="truncate">{p.batch}</span>
           </div>
           <h3 className="font-bold text-slate-800 leading-snug line-clamp-2 min-h-[2.75rem]">{p.name}</h3>
+          <ProductTags product={p} className="mt-1.5" />
           <div className="mt-3">
             <div className="flex justify-between text-[11px] text-slate-500 font-medium mb-1">
               <span>Claims: {p.sold}</span>

@@ -402,3 +402,30 @@ test('anunciar por membro: dado inválido não cria nada pela metade', () => {
   assert.equal(admin('saveProductBatch', { product: { name: '', price: 30 }, variants: [{ member: 'RM' }] }).ok, false);
   assert.equal(api.call('catalog').products.length, 0);
 });
+
+test('produto informa frete (incluso ou não) e condição (novo, lacrado, aberto)', () => {
+  const { api, admin, gas } = freshBackend();
+  addProduct(admin, { name: 'Álbum', shippingCost: 'Frete incluso', condition: 'Lacrado' });
+  addProduct(admin, { name: 'Sem info' });
+  const [a, b] = api.call('catalog').products;
+  assert.equal(a.shippingCost, 'Frete incluso');
+  assert.equal(a.condition, 'Lacrado');
+  assert.equal(b.shippingCost, '');
+  assert.equal(b.condition, '');
+  assert.deepEqual(gas.state.sheets['Produtos'][0].slice(11), ['Frete', 'Condição']);
+  assert.deepEqual(gas.state.sheets['Produtos'][1].slice(11), ['Frete incluso', 'Lacrado']);
+
+  // digitado na planilha sem acento/maiúscula também vale
+  gas.state.sheets['Produtos'][2][11] = 'frete nao incluso';
+  gas.state.sheets['Produtos'][2][12] = 'ABERTO';
+  const fixed = api.call('catalog').products[1];
+  assert.equal(fixed.shippingCost, 'Frete não incluso');
+  assert.equal(fixed.condition, 'Aberto');
+
+  assert.equal(admin('saveProduct', { product: { isNew: true, name: 'X', price: 1, totalStock: 1, condition: 'Usado' } }).ok, false);
+  const batch = admin('saveProductBatch', {
+    product: { name: 'PC', price: 10, shippingCost: 'Frete não incluso', condition: 'Novo' },
+    variants: [{ member: 'RM' }, { member: 'Jin' }]
+  });
+  assert.deepEqual(batch.products.map((p) => [p.shippingCost, p.condition]), [['Frete não incluso', 'Novo'], ['Frete não incluso', 'Novo']]);
+});

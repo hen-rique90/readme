@@ -35,7 +35,11 @@ export function seedDemo(backend, gas, password) {
   PRODUCTS.forEach(([name, member, category, price, totalStock, image, batch]) => {
     const installmentDates = price >= 300 ? [day(15), day(45), day(75)] : [];
     admin('saveProduct', {
-      product: { isNew: true, name, member, category, price, totalStock, image, batch, dueDate: day(15), installmentDates }
+      product: {
+        isNew: true, name, member, category, price, totalStock, image, batch, dueDate: day(15), installmentDates,
+        condition: category === 'Álbuns' || category === 'Vinil' ? 'Lacrado' : 'Novo',
+        shippingCost: price >= 300 ? 'Frete incluso' : 'Frete não incluso'
+      }
     });
   });
 

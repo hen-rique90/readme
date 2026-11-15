@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { CheckCircle2, Phone, ReceiptText, Undo2, UserRound } from 'lucide-react';
 import { api } from '../api';
 import { formatBRL, formatDay, formatDayShort, loadBuyer, saveBuyer, splitInstallments, waLink } from '../utils';
-import { CopyButton, Modal, PixBox, ProductImage, Spinner } from './common';
+import { CopyButton, Modal, PixBox, ProductImage, ProductTags, Spinner } from './common';
 
 export default function ClaimModal({
   product, config, session, initialResult = null, onClose, onClaimed, onViewOrders, onLoginRequired, onSessionExpired, showToast
@@ -168,6 +168,7 @@ export default function ClaimModal({
             </span>
             <h3 className="font-extrabold text-slate-800 text-sm leading-snug">{product.name}</h3>
             <span className="text-base font-black text-purple-900">{formatBRL(product.price)} cada</span>
+            <ProductTags product={product} className="mt-1" />
           </div>
         </div>
 
@@ -268,7 +269,12 @@ export default function ClaimModal({
           />
         </div>
         <p className="text-[11px] text-slate-500 leading-relaxed">
-          Fretes (internacional e nacional) são cobrados depois, quando o lote chegar. Você acompanha tudo em "Meus Pedidos".
+          {product.shippingCost === 'Frete incluso'
+            ? 'Frete já incluso no valor. '
+            : product.shippingCost === 'Frete não incluso'
+              ? 'Frete não incluso: é cobrado à parte, quando o lote chegar. '
+              : 'Fretes (internacional e nacional) são cobrados depois, quando o lote chegar. '}
+          Você acompanha tudo em "Meus Pedidos".
           Não pedimos dados de cartão: o pagamento é só por Pix.
         </p>
         <button

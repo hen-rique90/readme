@@ -23,7 +23,7 @@ var SHEETS = {
 
 var HEADERS = {
   config: ['Chave', 'Valor', 'Descrição'],
-  products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo', 'Prazo Pagamento', 'Datas Pix Parcelado'],
+  products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo', 'Prazo Pagamento', 'Datas Pix Parcelado', 'Frete', 'Condição'],
   orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento', 'Obs. da compradora'],
   charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento'],
   clients: ['WhatsApp', 'Nome', '@ (Insta/Twitter)', 'Senha (protegida)', 'Sal', 'Criada em', 'Último acesso', 'Trocar senha']
@@ -56,7 +56,9 @@ var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'no
 var ORDER_STATUSES = ['Reservado', 'Comprado', 'A caminho do Brasil', 'Chegou (na bag)', 'Enviado', 'Entregue', 'Cancelado'];
 var CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 var SHIPPING_OPTIONS = ['Guardar na bag', 'Enviar assim que chegar'];
-var SCHEMA_VERSION = '4';
+var SCHEMA_VERSION = '5';
+var SHIPPING_COST_OPTIONS = ['Frete incluso', 'Frete não incluso'];
+var CONDITION_OPTIONS = ['Novo', 'Lacrado', 'Aberto'];
 
 // ----------------------------------------------------------------------------
 // ENTRADAS HTTP
@@ -359,6 +361,8 @@ function publicConfig_() {
   out.requireLogin = yes_(out.requireLogin);
   out.maxPerClaim = Math.max(1, Math.floor(num_(out.maxPerClaim) || 5));
   out.orderStatuses = ORDER_STATUSES;
+  out.shippingCostOptions = SHIPPING_COST_OPTIONS;
+  out.conditionOptions = CONDITION_OPTIONS;
   out.shippingOptions = SHIPPING_OPTIONS;
   return out;
 }
@@ -377,13 +381,23 @@ function toProduct_(r) {
     batch: str_(v[7]),
     active: yes_(v[8]),
     dueDate: dateKey_(v[9]),
-    installmentDates: dateList_(v[10])
+    installmentDates: dateList_(v[10]),
+    shippingCost: oneOf_(v[11], SHIPPING_COST_OPTIONS),
+    condition: oneOf_(v[12], CONDITION_OPTIONS)
   };
+}
+
+// Aceita o valor só se for uma das opções (ignorando maiúsculas e acentos digitados na planilha)
+function oneOf_(v, options) {
+  var plain = function (t) { return str_(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); };
+  var wanted = plain(v);
+  for (var i = 0; i < options.length; i++) if (plain(options[i]) === wanted) return options[i];
+  return '';
 }
 
 function productRow_(p) {
   return [p.id, p.name, p.member, p.category, p.price, p.totalStock, p.image, p.batch, p.active ? 'SIM' : 'NÃO',
-    dateText_(p.dueDate), (p.installmentDates || []).map(dateText_).join('; ')];
+    dateText_(p.dueDate), (p.installmentDates || []).map(dateText_).join('; '), p.shippingCost || '', p.condition || ''];
 }
 
 function toOrder_(r) {
@@ -686,8 +700,12 @@ function productFromInput_(input, id) {
     batch: str_(input.batch) || 'CEG Atual',
     active: input.active === undefined ? true : !!input.active,
     dueDate: dateKey_(input.dueDate),
-    installmentDates: dateList_(input.installmentDates || [])
+    installmentDates: dateList_(input.installmentDates || []),
+    shippingCost: oneOf_(input.shippingCost, SHIPPING_COST_OPTIONS),
+    condition: oneOf_(input.condition, CONDITION_OPTIONS)
   };
+  if (str_(input.shippingCost) && !product.shippingCost) throw userError_('Opção de frete inválida.');
+  if (str_(input.condition) && !product.condition) throw userError_('Condição inválida.');
   if (product.installmentDates.length === 1) {
     throw userError_('O Pix parcelado precisa de pelo menos 2 datas. Para uma data só, use o prazo para pagamento.');
   }

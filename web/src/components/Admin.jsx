@@ -8,7 +8,7 @@ import {
   CATEGORIES, MEMBERS, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone,
   formatDay, formatDayShort, isAlbumLink, isOverdue, memberBadgeColor, orderStatusColor, splitInstallments, waLink
 } from '../utils';
-import { Badge, DateListInput, DueBadge, Modal, ProductImage, Spinner } from './common';
+import { Badge, DateListInput, DueBadge, Modal, ProductImage, ProductTags, Spinner } from './common';
 
 const PASS_KEY = 'ceg_adm_senha';
 const CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
@@ -521,7 +521,7 @@ const BY_MEMBER = MEMBERS.filter((m) => m !== 'OT7');
 
 const EMPTY_PRODUCT = {
   id: '', name: '', member: 'OT7', category: 'Photocards', price: '', totalStock: 1, image: '', batch: '', active: true,
-  dueDate: '', parcelado: false, installmentDates: ['', '']
+  dueDate: '', parcelado: false, installmentDates: ['', ''], shippingCost: '', condition: ''
 };
 
 function ProductsTab({ data, run }) {
@@ -646,6 +646,22 @@ function ProductsTab({ data, run }) {
             </div>
           )}
         </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Condição</label>
+            <select value={form.condition || ''} onChange={set('condition')} className="input">
+              <option value="">Não informar</option>
+              {(data.config.conditionOptions || ['Novo', 'Lacrado', 'Aberto']).map((c) => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Frete</label>
+            <select value={form.shippingCost || ''} onChange={set('shippingCost')} className="input">
+              <option value="">Não informar</option>
+              {(data.config.shippingCostOptions || ['Frete incluso', 'Frete não incluso']).map((c) => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
         {byMember && !editing && (
           <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50/40 p-3 space-y-2">
             <div className="flex items-center justify-between">
@@ -768,6 +784,7 @@ function ProductsTab({ data, run }) {
                     {!p.active && <Badge className="bg-slate-200 text-slate-600 border-slate-300">Oculto</Badge>}
                   </div>
                   <h4 className="font-bold text-slate-800 text-sm">{p.name}</h4>
+                  <ProductTags product={p} className="my-0.5" />
                   <p className="text-xs font-bold text-purple-900">
                     {formatBRL(p.price)} •{' '}
                     <span className={p.available === 0 ? 'text-rose-600' : 'text-emerald-600'}>{p.available} livres</span>{' '}
