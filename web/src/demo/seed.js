@@ -43,6 +43,16 @@ export function seedDemo(backend, gas, password) {
     });
   });
 
+  // Outros grupos (os itens acima são de BTS, o grupo padrão)
+  admin('saveProduct', {
+    product: { isNew: true, name: 'Photocard Felix - ATE (Soundwave)', group: 'Stray Kids', member: 'Felix', category: 'Photocards',
+      price: 45, totalStock: 1, batch: 'CEG #43 - Japão', dueDate: day(15), condition: 'Novo', shippingCost: 'Frete não incluso' }
+  });
+  admin('saveProduct', {
+    product: { isNew: true, name: 'Álbum BORN PINK (Box Set)', group: 'BLACKPINK', member: 'OT4', category: 'Álbuns',
+      price: 220, totalStock: 2, batch: 'CEG #43 - Japão', dueDate: day(15), condition: 'Lacrado', shippingCost: 'Frete não incluso' }
+  });
+
   const claim = (productId, quantity, buyerName, contact, whatsapp) =>
     backend.call('claim', { productId, quantity, buyerName, contact, whatsapp, shipping: 'Guardar na bag' });
 

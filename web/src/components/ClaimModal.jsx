@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CheckCircle2, Phone, ReceiptText, Undo2, UserRound } from 'lucide-react';
 import { api } from '../api';
-import { formatBRL, formatDay, formatDayShort, loadBuyer, saveBuyer, splitInstallments, waLink } from '../utils';
+import { formatBRL, formatDay, formatDayShort, groupOf, loadBuyer, saveBuyer, splitInstallments, waLink } from '../utils';
 import { CopyButton, Modal, PixBox, ProductImage, ProductTags, Spinner } from './common';
 
 export default function ClaimModal({
@@ -164,7 +164,7 @@ export default function ClaimModal({
           <ProductImage src={product.image} className="w-16 h-16 rounded-2xl border border-purple-200 shrink-0" />
           <div>
             <span className="text-[11px] font-black text-purple-700 uppercase">
-              #{product.id} • {product.member}
+              #{product.id} • {groupOf(product)} • {product.member}
             </span>
             <h3 className="font-extrabold text-slate-800 text-sm leading-snug">{product.name}</h3>
             <span className="text-base font-black text-purple-900">{formatBRL(product.price)} cada</span>

@@ -23,7 +23,7 @@ var SHEETS = {
 
 var HEADERS = {
   config: ['Chave', 'Valor', 'Descrição'],
-  products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo', 'Prazo Pagamento', 'Datas Pix Parcelado', 'Frete', 'Condição'],
+  products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo', 'Prazo Pagamento', 'Datas Pix Parcelado', 'Frete', 'Condição', 'Grupo'],
   orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento', 'Obs. da compradora'],
   charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento'],
   clients: ['WhatsApp', 'Nome', '@ (Insta/Twitter)', 'Senha (protegida)', 'Sal', 'Criada em', 'Último acesso', 'Trocar senha']
@@ -56,7 +56,8 @@ var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'no
 var ORDER_STATUSES = ['Reservado', 'Comprado', 'A caminho do Brasil', 'Chegou (na bag)', 'Enviado', 'Entregue', 'Cancelado'];
 var CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 var SHIPPING_OPTIONS = ['Guardar na bag', 'Enviar assim que chegar'];
-var SCHEMA_VERSION = '5';
+var SCHEMA_VERSION = '6';
+var DEFAULT_GROUP = 'BTS'; // produtos antigos, sem grupo, eram todos de BTS
 var SHIPPING_COST_OPTIONS = ['Frete incluso', 'Frete não incluso'];
 var CONDITION_OPTIONS = ['Novo', 'Lacrado', 'Aberto'];
 
@@ -383,7 +384,8 @@ function toProduct_(r) {
     dueDate: dateKey_(v[9]),
     installmentDates: dateList_(v[10]),
     shippingCost: oneOf_(v[11], SHIPPING_COST_OPTIONS),
-    condition: oneOf_(v[12], CONDITION_OPTIONS)
+    condition: oneOf_(v[12], CONDITION_OPTIONS),
+    group: str_(v[13]) || DEFAULT_GROUP
   };
 }
 
@@ -397,7 +399,7 @@ function oneOf_(v, options) {
 
 function productRow_(p) {
   return [p.id, p.name, p.member, p.category, p.price, p.totalStock, p.image, p.batch, p.active ? 'SIM' : 'NÃO',
-    dateText_(p.dueDate), (p.installmentDates || []).map(dateText_).join('; '), p.shippingCost || '', p.condition || ''];
+    dateText_(p.dueDate), (p.installmentDates || []).map(dateText_).join('; '), p.shippingCost || '', p.condition || '', p.group || DEFAULT_GROUP];
 }
 
 function toOrder_(r) {
@@ -702,7 +704,8 @@ function productFromInput_(input, id) {
     dueDate: dateKey_(input.dueDate),
     installmentDates: dateList_(input.installmentDates || []),
     shippingCost: oneOf_(input.shippingCost, SHIPPING_COST_OPTIONS),
-    condition: oneOf_(input.condition, CONDITION_OPTIONS)
+    condition: oneOf_(input.condition, CONDITION_OPTIONS),
+    group: str_(input.group).replace(/\s+/g, ' ').slice(0, 40) || DEFAULT_GROUP
   };
   if (str_(input.shippingCost) && !product.shippingCost) throw userError_('Opção de frete inválida.');
   if (str_(input.condition) && !product.condition) throw userError_('Condição inválida.');
