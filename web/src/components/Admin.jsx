@@ -12,6 +12,7 @@ import {
 import { Badge, DateListInput, DueBadge, Modal, ProductImage, ProductTags, Spinner } from './common';
 import SaleTab from './SaleTab';
 import RemindersTab from './RemindersTab';
+import { EditBuyerModal, MergeBuyerModal, SameNamePanel } from './BuyerTools';
 
 const PASS_KEY = 'ceg_adm_senha';
 const CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
@@ -134,6 +135,12 @@ export default function Admin({ showToast, onCatalogChange }) {
         <BuyersTab
           data={data}
           run={run}
+          call={call}
+          showToast={showToast}
+          reload={async () => {
+            await load(password, true);
+            onCatalogChange();
+          }}
           onShowOrders={(text) => {
             setOrdersQuery((q) => ({ text, n: q.n + 1 }));
             setTab('orders');
@@ -385,17 +392,91 @@ function OrdersTab({ data, run, initialQuery = '' }) {
   );
 }
 
+// Corrigir valor, descrição ou vencimento de uma cobrança já lançada
+function EditCharge({ charge, run, onDone }) {
+  const [form, setForm] = useState({ amount: charge.amount, description: charge.description, dueDate: charge.dueDate || '' });
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  return (
+    <form
+      className="bg-purple-50 rounded-xl p-2.5 border border-purple-300 space-y-2"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (charge.status === 'Pago' && Number(form.amount) !== charge.amount &&
+          !window.confirm('Essa cobrança já está paga. Mudar o valor muda o total pago dela. Continuar?')) return;
+        if (await run('adminUpdateCharge', { chargeId: charge.chargeId, ...form }, 'Cobrança corrigida')) onDone();
+      }}
+    >
+      <input required value={form.description} onChange={set('description')} className="input py-1.5" aria-label="Descrição" />
+      <div className="grid grid-cols-2 gap-2">
+        <input required type="number" step="0.01" min="0.01" value={form.amount} onChange={set('amount')} className="input py-1.5" aria-label="Valor" />
+        <input type="date" value={form.dueDate} onChange={set('dueDate')} className="input py-1.5" aria-label="Vencimento" />
+      </div>
+      <div className="flex gap-2">
+        <button className="btn-primary flex-1 py-1.5">Salvar</button>
+        <button type="button" onClick={onDone} className="btn-soft">Cancelar</button>
+      </div>
+    </form>
+  );
+}
+
+// Corrigir produto, quantidade e valor unitário do pedido
+function EditItem({ order, run }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ productName: order.productName, quantity: order.quantity, unitPrice: order.unitPrice, adjustCharge: true });
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const total = (Number(form.quantity) || 0) * (Number(form.unitPrice) || 0);
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="text-xs font-bold text-purple-700 hover:underline">
+        ✏️ Editar item (produto, quantidade, valor)
+      </button>
+    );
+  }
+  return (
+    <form
+      className="bg-purple-50 rounded-xl p-3 border border-purple-300 space-y-2"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const res = await run('adminUpdateOrder', { orderId: order.orderId, ...form }, (r) =>
+          r.adjustedCharge ? `Item corrigido; cobrança ajustada para ${formatBRL(r.adjustedCharge.amount)}` : 'Item corrigido'
+        );
+        if (res) setOpen(false);
+      }}
+    >
+      <h4 className="font-extrabold text-slate-800 text-sm">Editar item</h4>
+      <input required value={form.productName} onChange={set('productName')} className="input py-1.5" aria-label="Produto" />
+      <div className="grid grid-cols-3 gap-2 items-center">
+        <input required type="number" min="1" value={form.quantity} onChange={set('quantity')} className="input py-1.5" aria-label="Quantidade" title="Quantidade" />
+        <input required type="number" step="0.01" min="0.01" value={form.unitPrice} onChange={set('unitPrice')} className="input py-1.5" aria-label="Valor unitário" title="Valor unitário" />
+        <span className="text-xs font-bold text-purple-900">= {formatBRL(total)}</span>
+      </div>
+      <label className="flex items-center gap-2 text-[11px] text-slate-600">
+        <input type="checkbox" checked={form.adjustCharge} onChange={set('adjustCharge')} className="w-4 h-4 accent-purple-600" />
+        Ajustar a cobrança do item junto (se for uma só e estiver pendente)
+      </label>
+      <div className="flex gap-2">
+        <button className="btn-primary flex-1 py-1.5">Salvar</button>
+        <button type="button" onClick={() => setOpen(false)} className="btn-soft">Cancelar</button>
+      </div>
+    </form>
+  );
+}
+
 function OrderDetails({ order, charges, run, onTransferred }) {
   const [desc, setDesc] = useState('Frete internacional');
   const [amount, setAmount] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [note, setNote] = useState(order.note);
+  const [editingCharge, setEditingCharge] = useState(null);
   return (
     <div className="grid lg:grid-cols-2 gap-4">
       <div className="space-y-2">
+        <EditItem order={order} run={run} />
         <h4 className="font-extrabold text-slate-800 text-sm">Cobranças deste pedido</h4>
         {charges.length === 0 && <p className="text-xs text-slate-400">Nenhuma cobrança.</p>}
-        {charges.map((c) => (
+        {charges.map((c) => editingCharge === c.chargeId ? (
+          <EditCharge key={c.chargeId} charge={c} run={run} onDone={() => setEditingCharge(null)} />
+        ) : (
           <div key={c.chargeId} className="flex flex-wrap items-center justify-between gap-2 bg-white rounded-xl p-2.5 border border-purple-100">
             <div>
               <span className="text-sm font-semibold text-slate-800">{c.description}</span>
@@ -413,6 +494,14 @@ function OrderDetails({ order, charges, run, onTransferred }) {
               >
                 {CHARGE_STATUSES.map((s) => <option key={s}>{s}</option>)}
               </select>
+              <button
+                onClick={() => setEditingCharge(c.chargeId)}
+                className="p-1.5 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100"
+                aria-label="Corrigir cobrança"
+                title="Corrigir valor, descrição ou vencimento"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+              </button>
               {c.status !== 'Pago' && (
                 <button
                   onClick={() => window.confirm('Excluir esta cobrança?') && run('deleteCharge', { chargeId: c.chargeId }, 'Cobrança excluída')}
@@ -550,7 +639,9 @@ function TransferBox({ order, charges, run, onTransferred }) {
 
 // ---------------------------------------------------------------------------
 
-function BuyersTab({ data, run, onShowOrders }) {
+function BuyersTab({ data, run, call, reload, showToast, onShowOrders }) {
+  const [editing, setEditing] = useState(null);
+  const [merging, setMerging] = useState(null); // { buyer, preselect }
   const [onlyOwing, setOnlyOwing] = useState(true);
   const [temp, setTemp] = useState(null);
   const accounts = useMemo(() => {
@@ -590,6 +681,18 @@ function BuyersTab({ data, run, onShowOrders }) {
       ? `Você acompanha tudo em "Meus Pedidos" entrando na sua conta no site.`
       : `Crie sua conta no site (botão "Entrar" → "Criar conta") com este WhatsApp e o código ${b.pending[0]?.order.orderId || ''} para acompanhar tudo em "Meus Pedidos".`);
 
+  // dados que as ferramentas de corrigir/juntar precisam
+  const orderCount = useMemo(() => {
+    const m = {};
+    data.orders.forEach((o) => { m[o.whatsapp] = (m[o.whatsapp] || 0) + 1; });
+    return m;
+  }, [data.orders]);
+  const toolBuyer = (b) => ({ ...b, orders: orderCount[b.whatsapp] || 0, account: !!accounts[b.whatsapp] });
+
+  const deleteAccount = (b) =>
+    window.confirm(`Excluir a CONTA (login) de ${b.name}? Os pedidos dela continuam no sistema.`) &&
+    run('adminDeleteAccount', { whatsapp: b.whatsapp }, 'Conta excluída');
+
   const resetPassword = async (b) => {
     if (!window.confirm(`Gerar uma senha temporária para ${b.name}? A senha atual dela deixa de funcionar.`)) return;
     const res = await run('adminResetPassword', { whatsapp: b.whatsapp }, 'Senha temporária gerada');
@@ -599,6 +702,23 @@ function BuyersTab({ data, run, onShowOrders }) {
   return (
     <div className="space-y-4">
     <PhoneConflicts data={data} onShowOrders={onShowOrders} />
+    <SameNamePanel
+      data={data}
+      onEdit={(b) => setEditing(toolBuyer(b))}
+      onMerge={(b, preselect) => setMerging({ buyer: toolBuyer(b), preselect })}
+    />
+    {editing && <EditBuyerModal buyer={editing} call={call} reload={reload} showToast={showToast} onClose={() => setEditing(null)} />}
+    {merging && (
+      <MergeBuyerModal
+        buyer={merging.buyer}
+        preselect={merging.preselect}
+        buyers={buyers.filter((b) => b.whatsapp).map(toolBuyer)}
+        call={call}
+        reload={reload}
+        showToast={showToast}
+        onClose={() => setMerging(null)}
+      />
+    )}
     <div className="card overflow-hidden">
       <div className="p-4 flex flex-wrap gap-3 items-center border-b border-purple-50">
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar compradora..." className="input flex-1 min-w-[200px]" />
@@ -638,11 +758,26 @@ function BuyersTab({ data, run, onShowOrders }) {
               )}
               <span className="block text-xs text-slate-400">{formatPhone(b.whatsapp)} • {b.items} item(ns)</span>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <div className="text-right text-xs">
                 <span className="block text-emerald-700 font-bold">Pago {formatBRL(b.paid)}</span>
                 <span className={`font-black text-sm ${b.owed > 0 ? 'text-amber-600' : 'text-slate-400'}`}>Deve {formatBRL(b.owed)}</span>
               </div>
+              {b.whatsapp && (
+                <>
+                  <button onClick={() => setEditing(toolBuyer(b))} className="btn-soft" title="Corrigir nome, @ ou WhatsApp em todos os pedidos">
+                    ✏️ Corrigir
+                  </button>
+                  <button onClick={() => setMerging({ buyer: toolBuyer(b) })} className="btn-soft" title="Mesma pessoa com dois números">
+                    🔗 Juntar
+                  </button>
+                </>
+              )}
+              {accounts[b.whatsapp] && (
+                <button onClick={() => deleteAccount(b)} className="btn-soft" title="Apaga só o login; os pedidos continuam">
+                  🗑️ Conta
+                </button>
+              )}
               {accounts[b.whatsapp] && (
                 <button onClick={() => resetPassword(b)} className="btn-soft" title="Para quem esqueceu a senha">
                   <KeyRound className="w-3.5 h-3.5" /> Senha temporária

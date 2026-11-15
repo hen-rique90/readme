@@ -624,3 +624,94 @@ test('forma de pagamento: compradora troca logo após o claim (não se for Pix p
   const b = api.call('claim', { token: reg.token, productId: p.id, quantity: 1, paymentPlan: 'parcelado' });
   assert.equal(api.call('updateMyOrder', { token: reg.token, orderId: b.order.orderId, paymentMethod: 'Cartão de crédito' }).ok, false);
 });
+
+// ---------------------------------------------------------------- corrigir / juntar compradoras
+test('corrigir dados: troca nome e WhatsApp em todos os pedidos, cobranças e na conta', () => {
+  const { api, admin, gas } = freshBackend();
+  const p = addProduct(admin, { totalStock: 5 });
+  const reg = api.call('register', { name: 'Thaty', contact: '@t', whatsapp: '53991811760', password: '123456' }); // número errado
+  api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+  api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+  const res = admin('adminUpdateBuyer', { whatsapp: '53991811760', name: 'Thaty Souza', contact: '@thaty', newWhatsapp: '(53) 99181-1761' });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(res.orders, 2);
+  assert.match(res.account, /mesma senha/);
+  const login = api.call('login', { whatsapp: '53991811761', password: '123456' });
+  assert.equal(login.ok, true, 'entra com o número novo e a mesma senha');
+  const mine = api.call('myOrders', { token: login.token });
+  assert.equal(mine.orders.length, 2);
+  assert.equal(mine.orders[0].buyerName, 'Thaty Souza');
+  assert.match(mine.orders[0].history, /dados da compradora corrigidos/);
+  assert.equal(/5399181176/.test(mine.orders[0].history), false);
+  assert.ok(gas.state.sheets['Cobranças'].slice(1).every((r) => r[2] === '53991811761'));
+  assert.equal(api.call('login', { whatsapp: '53991811760', password: '123456' }).ok, false);
+});
+
+test('juntar compradoras: avisa conflito, junta pedidos e deixa uma conta só', () => {
+  const { api, admin, gas } = freshBackend();
+  const p = addProduct(admin, { totalStock: 9 });
+  const a = api.call('register', { name: 'Caroline', contact: '@carol', whatsapp: '44998210932', password: '111111' });
+  const b = api.call('register', { name: 'Carol', contact: '@carol', whatsapp: '44982109320', password: '222222' });
+  api.call('claim', { token: a.token, productId: p.id, quantity: 1 });
+  api.call('claim', { token: b.token, productId: p.id, quantity: 1 });
+  api.call('claim', { token: b.token, productId: p.id, quantity: 1 });
+
+  const conflict = admin('adminUpdateBuyer', { whatsapp: '44982109320', name: 'Caroline', newWhatsapp: '44998210932' });
+  assert.equal(conflict.ok, false);
+  assert.equal(conflict.conflict, true);
+  assert.deepEqual(conflict.conflictNames, ['Caroline']);
+
+  const merged = admin('adminUpdateBuyer', { whatsapp: '44982109320', name: 'Caroline Lima', newWhatsapp: '44998210932', merge: true });
+  assert.equal(merged.ok, true, merged.error);
+  assert.equal(merged.orders, 3, 'pedidos das duas ficam no mesmo nome');
+  assert.equal(gas.state.sheets['Clientes'].length, 2, 'cabeçalho + uma conta');
+  const mine = api.call('myOrders', { token: api.call('login', { whatsapp: '44998210932', password: '111111' }).token });
+  assert.equal(mine.orders.length, 3);
+  assert.ok(mine.orders.every((o) => o.buyerName === 'Caroline Lima'));
+});
+
+test('corrigir dados não junta "sem WhatsApp"; excluir conta mantém os pedidos', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3 });
+  assert.equal(admin('adminUpdateBuyer', { whatsapp: '', name: 'X', newWhatsapp: '11911112222' }).ok, false);
+  const reg = api.call('register', { name: 'Teste', contact: '@t', whatsapp: '99999999999', password: '123456' });
+  api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+  assert.equal(admin('adminDeleteAccount', { whatsapp: '99999999999' }).ok, true);
+  assert.equal(api.call('login', { whatsapp: '99999999999', password: '123456' }).ok, false);
+  assert.equal(admin('adminData').orders.length, 1, 'pedido continua');
+});
+
+// ---------------------------------------------------------------- corrigir valores
+test('corrigir cobrança: valor, descrição e vencimento, com histórico', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3 });
+  const { order, charge } = api.call('claim', { ...buyer, productId: p.id, quantity: 1 });
+  const res = admin('adminUpdateCharge', { chargeId: charge.chargeId, amount: '90,00', description: 'Item com desconto', dueDate: '2026-12-20' });
+  assert.equal(res.ok, true, res.error);
+  assert.deepEqual([res.charge.amount, res.charge.description, res.charge.dueDate], [90, 'Item com desconto', '2026-12-20']);
+  assert.equal(admin('adminUpdateCharge', { chargeId: charge.chargeId, amount: 90 }).ok, false, 'nada mudou');
+  assert.equal(admin('adminUpdateCharge', { chargeId: charge.chargeId, amount: 0 }).ok, false);
+  const mine = api.call('myOrders', { whatsapp: buyer.whatsapp, code: order.orderId });
+  assert.equal(mine.totals.owed, 90);
+  assert.match(mine.orders[0].history, /R\$ 95,00 → R\$ 90,00/);
+});
+
+test('corrigir item: quantidade e valor recalculam o total e ajustam a cobrança pendente', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3 });
+  const { order } = api.call('claim', { ...buyer, productId: p.id, quantity: 1 });
+  const res = admin('adminUpdateOrder', { orderId: order.orderId, quantity: 2, unitPrice: 80 });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(res.order.itemTotal, 160);
+  assert.equal(res.adjustedCharge.amount, 160);
+  assert.equal(api.call('catalog').products[0].available, 1);
+  assert.equal(admin('adminUpdateOrder', { orderId: order.orderId, quantity: 5 }).ok, false, 'sem estoque');
+
+  // cobrança já paga não é mexida; e dá para não ajustar
+  const sale = admin('adminCreateSale', { buyer: { name: 'Lara', whatsapp: '62981613350' }, product: { name: 'DVD' }, unitPrice: 100, payment: { mode: 'avista', paid: true } });
+  const r2 = admin('adminUpdateOrder', { orderId: sale.order.orderId, unitPrice: 120 });
+  assert.equal(r2.order.itemTotal, 120);
+  assert.equal(r2.adjustedCharge, null);
+  const r3 = admin('adminUpdateOrder', { orderId: order.orderId, unitPrice: 70, adjustCharge: false });
+  assert.equal(r3.adjustedCharge, null);
+});
