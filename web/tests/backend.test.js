@@ -412,8 +412,8 @@ test('produto informa frete (incluso ou não) e condição (novo, lacrado, abert
   assert.equal(a.condition, 'Lacrado');
   assert.equal(b.shippingCost, '');
   assert.equal(b.condition, '');
-  assert.deepEqual(gas.state.sheets['Produtos'][0].slice(11), ['Frete', 'Condição']);
-  assert.deepEqual(gas.state.sheets['Produtos'][1].slice(11), ['Frete incluso', 'Lacrado']);
+  assert.deepEqual(gas.state.sheets['Produtos'][0].slice(11, 13), ['Frete', 'Condição']);
+  assert.deepEqual(gas.state.sheets['Produtos'][1].slice(11, 13), ['Frete incluso', 'Lacrado']);
 
   // digitado na planilha sem acento/maiúscula também vale
   gas.state.sheets['Produtos'][2][11] = 'frete nao incluso';
@@ -428,4 +428,22 @@ test('produto informa frete (incluso ou não) e condição (novo, lacrado, abert
     variants: [{ member: 'RM' }, { member: 'Jin' }]
   });
   assert.deepEqual(batch.products.map((p) => [p.shippingCost, p.condition]), [['Frete não incluso', 'Novo'], ['Frete não incluso', 'Novo']]);
+});
+
+test('produto tem grupo de k-pop; sem grupo vale BTS', () => {
+  const { api, admin, gas } = freshBackend();
+  addProduct(admin, { name: 'PC Felix', group: 'Stray Kids', member: 'Felix' });
+  addProduct(admin, { name: 'Antigo' });
+  const batch = admin('saveProductBatch', {
+    product: { name: 'PC Born Pink', price: 20, group: '  BLACKPINK ' },
+    variants: [{ member: 'Jisoo' }, { member: 'Lisa' }]
+  });
+  assert.equal(batch.ok, true, batch.error);
+  gas.state.sheets['Produtos'][2][13] = ''; // linha antiga, sem grupo na planilha
+  const byName = Object.fromEntries(api.call('catalog').products.map((p) => [p.name, p]));
+  assert.equal(byName['PC Felix'].group, 'Stray Kids');
+  assert.equal(byName['PC Felix'].member, 'Felix');
+  assert.equal(byName['Antigo'].group, 'BTS');
+  assert.equal(byName['PC Born Pink — Lisa'].group, 'BLACKPINK');
+  assert.equal(gas.state.sheets['Produtos'][0][13], 'Grupo');
 });

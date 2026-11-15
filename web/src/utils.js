@@ -1,4 +1,29 @@
-export const MEMBERS = ['OT7', 'RM', 'Jin', 'Suga', 'J-Hope', 'Jimin', 'V', 'Jungkook'];
+// Grupos com seus integrantes. "OTn" = o grupo todo (ex.: OT7 para BTS).
+export const GROUPS = {
+  BTS: ['RM', 'Jin', 'Suga', 'J-Hope', 'Jimin', 'V', 'Jungkook'],
+  'Stray Kids': ['Bang Chan', 'Lee Know', 'Changbin', 'Hyunjin', 'Han', 'Felix', 'Seungmin', 'I.N'],
+  BLACKPINK: ['Jisoo', 'Jennie', 'Rosé', 'Lisa'],
+  TWICE: ['Nayeon', 'Jeongyeon', 'Momo', 'Sana', 'Jihyo', 'Mina', 'Dahyun', 'Chaeyoung', 'Tzuyu'],
+  SEVENTEEN: ['S.Coups', 'Jeonghan', 'Joshua', 'Jun', 'Hoshi', 'Wonwoo', 'Woozi', 'DK', 'Mingyu', 'The8', 'Seungkwan', 'Vernon', 'Dino'],
+  ENHYPEN: ['Jungwon', 'Heeseung', 'Jay', 'Jake', 'Sunghoon', 'Sunoo', 'Ni-ki'],
+  TXT: ['Soobin', 'Yeonjun', 'Beomgyu', 'Taehyun', 'Hueningkai'],
+  ATEEZ: ['Hongjoong', 'Seonghwa', 'Yunho', 'Yeosang', 'San', 'Mingi', 'Wooyoung', 'Jongho'],
+  NewJeans: ['Minji', 'Hanni', 'Danielle', 'Haerin', 'Hyein'],
+  aespa: ['Karina', 'Giselle', 'Winter', 'Ningning'],
+  'LE SSERAFIM': ['Sakura', 'Chaewon', 'Yunjin', 'Kazuha', 'Eunchae'],
+  IVE: ['Yujin', 'Gaeul', 'Rei', 'Wonyoung', 'Liz', 'Leeseo'],
+  ITZY: ['Yeji', 'Lia', 'Ryujin', 'Chaeryeong', 'Yuna']
+};
+export const GROUP_NAMES = Object.keys(GROUPS);
+export const DEFAULT_GROUP = 'BTS';
+
+export const groupOf = (p) => p.group || DEFAULT_GROUP;
+export const membersOf = (group) => GROUPS[group] || [];
+// Rótulo do "grupo todo": OT7, OT8, OT4... (grupo fora da lista: "Grupo todo")
+export const wholeGroupLabel = (group) => (GROUPS[group] ? `OT${GROUPS[group].length}` : 'Grupo todo');
+
+// Compatibilidade: integrantes do BTS (grupo original da loja)
+export const MEMBERS = ['OT7', ...GROUPS.BTS];
 export const CATEGORIES = ['Photocards', 'Álbuns', 'Merch/DVD', 'Vinil', 'Outros'];
 
 export const formatBRL = (value) =>
@@ -35,7 +60,9 @@ export const waLink = (phone, text) => {
 };
 
 export const memberBadgeColor = (member) =>
-  ({
+  /^OT\d+$|^Grupo todo$/.test(member || '')
+    ? 'bg-purple-600 text-white border-purple-700'
+    : ({
     OT7: 'bg-purple-600 text-white border-purple-700',
     RM: 'bg-sky-100 text-sky-800 border-sky-200',
     Jin: 'bg-pink-100 text-pink-800 border-pink-200',

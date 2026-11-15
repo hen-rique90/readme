@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { ChevronRight, Filter, Package, RefreshCw, Search, Sparkles } from 'lucide-react';
-import { CATEGORIES, MEMBERS, formatBRL, formatDay, memberBadgeColor, splitInstallments } from '../utils';
+import { CATEGORIES, GROUP_NAMES, formatBRL, formatDay, groupOf, memberBadgeColor, membersOf, splitInstallments } from '../utils';
 import { ProductImage, ProductTags, Spinner } from './common';
 
 export default function Catalog({ products, config, loading, error, session, busyId, onRefresh, onClaim }) {
   const [category, setCategory] = useState('Todos');
   const [member, setMember] = useState('Todos');
+  const [group, setGroup] = useState('Todos');
   const [batch, setBatch] = useState('Todos');
   const [query, setQuery] = useState('');
   const [onlyAvailable, setOnlyAvailable] = useState(false);
@@ -15,22 +16,31 @@ export default function Catalog({ products, config, loading, error, session, bus
     () => ['Todos', ...new Set([...CATEGORIES.filter((c) => products.some((p) => p.category === c)), ...products.map((p) => p.category)])],
     [products]
   );
-  const members = useMemo(
-    () => ['Todos', ...new Set([...MEMBERS.filter((m) => products.some((p) => p.member === m)), ...products.map((p) => p.member)])],
-    [products]
-  );
+  // Grupos que têm produto no catálogo (na ordem da lista conhecida, depois os outros)
+  const groups = useMemo(() => {
+    const present = new Set(products.map(groupOf));
+    return ['Todos', ...GROUP_NAMES.filter((g) => present.has(g)), ...[...present].filter((g) => !GROUP_NAMES.includes(g)).sort()];
+  }, [products]);
+  const inGroup = useMemo(() => products.filter((p) => group === 'Todos' || groupOf(p) === group), [products, group]);
+  // Membros do grupo escolhido (na ordem oficial), só os que têm produto
+  const members = useMemo(() => {
+    const present = new Set(inGroup.map((p) => p.member));
+    const ordered = group === 'Todos' ? [] : membersOf(group).filter((m) => present.has(m));
+    return ['Todos', ...new Set([...ordered, ...inGroup.map((p) => p.member)])];
+  }, [inGroup, group]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
     return products.filter(
       (p) =>
+        (group === 'Todos' || groupOf(p) === group) &&
         (category === 'Todos' || p.category === category) &&
         (member === 'Todos' || p.member === member) &&
         (batch === 'Todos' || p.batch === batch) &&
         (!onlyAvailable || p.available > 0) &&
-        (!q || `${p.name} ${p.id} ${p.member}`.toLowerCase().includes(q))
+        (!q || `${p.name} ${p.id} ${p.member} ${groupOf(p)}`.toLowerCase().includes(q))
     );
-  }, [products, category, member, batch, query, onlyAvailable]);
+  }, [products, group, category, member, batch, query, onlyAvailable]);
 
   const totalAvailable = products.reduce((acc, p) => acc + p.available, 0);
 
@@ -90,6 +100,26 @@ export default function Catalog({ products, config, loading, error, session, bus
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
           </button>
         </div>
+
+        {groups.length > 2 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            <span className="text-xs font-bold text-slate-400 mr-1 shrink-0">Grupo:</span>
+            {groups.map((g) => (
+              <button
+                key={g}
+                onClick={() => {
+                  setGroup(g);
+                  setMember('Todos');
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black whitespace-nowrap ${
+                  group === g ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {categories.map((c) => (
@@ -194,7 +224,7 @@ function ProductCard({ product: p, canClaim, loggedIn, busy, onClaim }) {
         </div>
         <div className="p-5">
           <div className="flex justify-between gap-2 text-[11px] font-bold text-purple-600 uppercase tracking-wider mb-1">
-            <span>{p.category}</span>
+            <span className="truncate">{groupOf(p)} • {p.category}</span>
             <span className="truncate">{p.batch}</span>
           </div>
           <h3 className="font-bold text-slate-800 leading-snug line-clamp-2 min-h-[2.75rem]">{p.name}</h3>

@@ -5,7 +5,8 @@ import {
 } from 'lucide-react';
 import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
 import {
-  CATEGORIES, MEMBERS, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone,
+  CATEGORIES, DEFAULT_GROUP, GROUPS, GROUP_NAMES, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone, groupOf, membersOf,
+  wholeGroupLabel,
   formatDay, formatDayShort, isAlbumLink, isOverdue, memberBadgeColor, orderStatusColor, splitInstallments, waLink
 } from '../utils';
 import { Badge, DateListInput, DueBadge, Modal, ProductImage, ProductTags, Spinner } from './common';
@@ -517,10 +518,9 @@ function BuyersTab({ data, run }) {
 
 // ---------------------------------------------------------------------------
 
-const BY_MEMBER = MEMBERS.filter((m) => m !== 'OT7');
 
 const EMPTY_PRODUCT = {
-  id: '', name: '', member: 'OT7', category: 'Photocards', price: '', totalStock: 1, image: '', batch: '', active: true,
+  id: '', name: '', group: DEFAULT_GROUP, member: 'OT7', category: 'Photocards', price: '', totalStock: 1, image: '', batch: '', active: true,
   dueDate: '', parcelado: false, installmentDates: ['', ''], shippingCost: '', condition: ''
 };
 
@@ -531,14 +531,37 @@ function ProductsTab({ data, run }) {
   const [saving, setSaving] = useState(false);
   const [byMember, setByMember] = useState(false);
   const [variants, setVariants] = useState({}); // { Jimin: { on, totalStock, image } }
+  const [otherGroup, setOtherGroup] = useState(false); // grupo fora da lista
+  const [customMembers, setCustomMembers] = useState(''); // integrantes digitados (grupo fora da lista)
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
-  const chosen = BY_MEMBER.filter((m) => variants[m]?.on);
+  const group = (form.group || '').trim();
+  const knownGroup = !otherGroup && !!GROUPS[group];
+  // Integrantes para o "por membro": os da lista oficial ou os digitados
+  const groupMembers = knownGroup
+    ? membersOf(group)
+    : [...new Set(customMembers.split(/[,;\n]+/).map((m) => m.trim()).filter(Boolean))];
+  // Opções do campo Membro: "OTn" + integrantes (+ o valor atual, se for diferente)
+  const memberOptions = [...new Set([wholeGroupLabel(group), ...groupMembers, form.member].filter(Boolean))];
+  const usedMembers = [...new Set(data.products.filter((p) => groupOf(p) === group).map((p) => p.member))];
+  const chosen = groupMembers.filter((m) => variants[m]?.on);
+  const chooseGroup = (value) => {
+    const isOther = value === '__outro__';
+    setOtherGroup(isOther);
+    setVariants({});
+    setForm({ ...form, group: isOther ? '' : value, member: isOther ? '' : wholeGroupLabel(value) });
+  };
   const setVariant = (m, patch) => setVariants({ ...variants, [m]: { totalStock: 1, image: '', ...variants[m], ...patch } });
 
   const reset = () => {
     setEditing(null);
     setVariants({});
-    setForm({ ...EMPTY_PRODUCT, batch: form.batch, dueDate: form.dueDate });
+    setForm({
+      ...EMPTY_PRODUCT,
+      batch: form.batch,
+      dueDate: form.dueDate,
+      group: form.group,
+      member: knownGroup ? wholeGroupLabel(group) : form.member
+    });
   };
 
   const save = async (e) => {
@@ -618,13 +641,44 @@ function ProductsTab({ data, run }) {
           <label className="label">Nome do produto *</label>
           <input required value={form.name} onChange={set('name')} placeholder="Photocard Jungkook Golden POB" className="input" />
         </div>
+        <div>
+          <label className="label">Grupo *</label>
+          <select value={otherGroup || !GROUPS[group] ? '__outro__' : group} onChange={(e) => chooseGroup(e.target.value)} className="input font-bold">
+            {GROUP_NAMES.map((g) => <option key={g} value={g}>{g}</option>)}
+            <option value="__outro__">Outro grupo…</option>
+          </select>
+          {(otherGroup || !GROUPS[group]) && (
+            <>
+              <input
+                required
+                value={form.group}
+                onChange={set('group')}
+                placeholder="Nome do grupo (ex: NCT 127)"
+                className="input mt-2"
+                list="other-groups"
+              />
+              <datalist id="other-groups">
+                {[...new Set(data.products.map(groupOf))].filter((g) => !GROUPS[g]).map((g) => <option key={g} value={g} />)}
+              </datalist>
+            </>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           {!(byMember && !editing) && (
             <div>
               <label className="label">Membro</label>
-              <select value={form.member} onChange={set('member')} className="input">
-                {[...new Set([...MEMBERS, form.member])].map((m) => <option key={m}>{m}</option>)}
-              </select>
+              {knownGroup ? (
+                <select value={form.member} onChange={set('member')} className="input">
+                  {memberOptions.map((m) => <option key={m}>{m}</option>)}
+                </select>
+              ) : (
+                <>
+                  <input value={form.member} onChange={set('member')} placeholder="Ex: Taeyong ou Grupo todo" className="input" list="other-members" />
+                  <datalist id="other-members">
+                    {['Grupo todo', ...usedMembers].map((m) => <option key={m} value={m} />)}
+                  </datalist>
+                </>
+              )}
             </div>
           )}
           <div className={byMember && !editing ? 'col-span-2' : ''}>
@@ -670,16 +724,25 @@ function ProductsTab({ data, run }) {
                 type="button"
                 className="text-xs font-bold text-fuchsia-700 underline"
                 onClick={() => {
-                  const all = chosen.length < BY_MEMBER.length;
+                  const all = chosen.length < groupMembers.length;
                   const next = {};
-                  BY_MEMBER.forEach((m) => { next[m] = { totalStock: 1, image: '', ...variants[m], on: all }; });
+                  groupMembers.forEach((m) => { next[m] = { totalStock: 1, image: '', ...variants[m], on: all }; });
                   setVariants(next);
                 }}
               >
-                {chosen.length < BY_MEMBER.length ? 'Marcar todos' : 'Desmarcar todos'}
+                {chosen.length < groupMembers.length ? 'Marcar todos' : 'Desmarcar todos'}
               </button>
             </div>
-            {BY_MEMBER.map((m) => {
+            {!knownGroup && (
+              <textarea
+                value={customMembers}
+                onChange={(e) => setCustomMembers(e.target.value)}
+                rows={2}
+                placeholder="Integrantes separados por vírgula (ex: Taeyong, Jaehyun, Doyoung)"
+                className="input resize-none"
+              />
+            )}
+            {groupMembers.map((m) => {
               const v = variants[m] || {};
               return (
                 <div key={m} className={`rounded-xl p-2 ${v.on ? 'bg-white border border-fuchsia-200' : ''}`}>
@@ -780,7 +843,7 @@ function ProductsTab({ data, run }) {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-xs font-black text-purple-700">#{p.id}</span>
                     <Badge className={memberBadgeColor(p.member)}>{p.member}</Badge>
-                    <span className="text-xs text-slate-400">{p.category} • {p.batch}</span>
+                    <span className="text-xs text-slate-400">{groupOf(p)} • {p.category} • {p.batch}</span>
                     {!p.active && <Badge className="bg-slate-200 text-slate-600 border-slate-300">Oculto</Badge>}
                   </div>
                   <h4 className="font-bold text-slate-800 text-sm">{p.name}</h4>
@@ -803,8 +866,10 @@ function ProductsTab({ data, run }) {
                 <button
                   onClick={() => {
                     setEditing(p.id);
+                    setOtherGroup(!GROUPS[groupOf(p)]);
                     setForm({
                       ...p,
+                      group: groupOf(p),
                       parcelado: (p.installmentDates || []).length > 0,
                       installmentDates: (p.installmentDates || []).length ? p.installmentDates : ['', '']
                     });
