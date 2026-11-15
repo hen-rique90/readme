@@ -124,7 +124,11 @@ var ADMIN_ACTIONS = {
   adminRejectTransfer: actionAdminRejectTransfer_,
   adminReminders: actionAdminReminders_,
   adminMarkReminded: actionAdminMarkReminded_,
-  adminSendDigest: actionAdminSendDigest_
+  adminSendDigest: actionAdminSendDigest_,
+  adminUpdateBuyer: actionAdminUpdateBuyer_,
+  adminDeleteAccount: actionAdminDeleteAccount_,
+  adminUpdateCharge: actionAdminUpdateCharge_,
+  adminUpdateOrder: actionAdminUpdateOrder_
 };
 
 // Ações que alteram a planilha e precisam da trava
@@ -133,7 +137,8 @@ var WRITE_ACTIONS = {
   setChargeStatus: true, addCharge: true, addBatchCharge: true, deleteCharge: true, saveConfig: true,
   register: true, login: true, updateProfile: true, changePassword: true, updateMyOrder: true, cancelMyOrder: true,
   adminResetPassword: true, adminCreateSale: true, adminTransferOrder: true, adminApproveTransfer: true,
-  adminRejectTransfer: true, requestTransfer: true, cancelTransferRequest: true, adminMarkReminded: true
+  adminRejectTransfer: true, requestTransfer: true, cancelTransferRequest: true, adminMarkReminded: true,
+  adminUpdateBuyer: true, adminDeleteAccount: true, adminUpdateCharge: true, adminUpdateOrder: true
 };
 
 function handle_(action, params) {
@@ -171,6 +176,7 @@ function handle_(action, params) {
       if (err.loginRequired) out.loginRequired = true;
       if (err.sessionExpired) out.sessionExpired = true;
       if (err.needsCode) out.needsCode = true;
+      if (err.conflict) { out.conflict = true; out.conflictNames = err.conflictNames; }
       return out;
     }
     return { ok: false, error: 'Erro no servidor: ' + (err && err.message ? err.message : err) };
@@ -1616,4 +1622,182 @@ function actionAdminSendDigest_() {
   var r = sendDigest_(true);
   r.ok = true;
   return r;
+}
+
+// ----------------------------------------------------------------------------
+// CORRIGIR / JUNTAR COMPRADORAS (todos os pedidos de um WhatsApp de uma vez)
+// ----------------------------------------------------------------------------
+// Grava em bloco (uma escrita por aba), para funcionar rápido mesmo com
+// dezenas de pedidos.
+
+function actionAdminUpdateBuyer_(params) {
+  var from = phone_(params.whatsapp);
+  if (!from) throw userError_('Essa compradora não tem WhatsApp. Corrija pedido por pedido em ADM → Pedidos.');
+  var to = phone_(params.newWhatsapp || params.whatsapp);
+  if (to.length < 10 || to.length > 11) throw userError_('WhatsApp inválido. Use DDD + número, ex: 11988887777.');
+  var name = str_(params.name).replace(/\s+/g, ' ').slice(0, 80);
+  var contact = str_(params.contact).slice(0, 60);
+  if (name.length < 2) throw userError_('Informe o nome.');
+
+  var orderSheet = sheet_('orders');
+  var orderValues = orderSheet.getDataRange().getValues();
+  var mine = 0;
+  var others = {};
+  for (var i = 1; i < orderValues.length; i++) {
+    var wa = phone_(orderValues[i][8]);
+    if (wa === from) mine++;
+    else if (to !== from && wa === to) others[str_(orderValues[i][6])] = true;
+  }
+  var fromClient = findClient_(from);
+  var toClient = to !== from ? findClient_(to) : null;
+  if (!mine && !fromClient) throw userError_('Nenhum pedido ou conta com esse WhatsApp.');
+  if (toClient) others[toClient.name] = true;
+
+  var otherNames = Object.keys(others);
+  var merging = otherNames.length > 0;
+  if (merging && !params.merge) {
+    var e = userError_('Esse WhatsApp já é de ' + otherNames.join(', ') + '. Se for a mesma pessoa, confirme para juntar os cadastros.');
+    e.conflict = true;
+    e.conflictNames = otherNames;
+    throw e;
+  }
+
+  var stamp = todayText_() + ' ' + (merging ? 'cadastro juntado pela loja' : 'dados da compradora corrigidos pela loja');
+  var changed = 0;
+  for (var r = 1; r < orderValues.length; r++) {
+    var w = phone_(orderValues[r][8]);
+    if (w !== from && !(merging && w === to)) continue;
+    if (w === from) {
+      var h = str_(orderValues[r][20]);
+      orderValues[r][20] = (h ? h + ' | ' : '') + stamp;
+    }
+    orderValues[r][6] = safeCell_(name);
+    orderValues[r][7] = safeCell_(contact || str_(orderValues[r][7]));
+    orderValues[r][8] = to;
+    changed++;
+  }
+  if (orderValues.length > 1) {
+    orderSheet.getRange(2, 1, orderValues.length - 1, orderValues[0].length).setValues(orderValues.slice(1));
+  }
+
+  if (from !== to) {
+    var chargeSheet = sheet_('charges');
+    var chargeValues = chargeSheet.getDataRange().getValues();
+    var touched = false;
+    for (var c = 1; c < chargeValues.length; c++) {
+      if (phone_(chargeValues[c][2]) === from) { chargeValues[c][2] = to; touched = true; }
+    }
+    if (touched) chargeSheet.getRange(2, 1, chargeValues.length - 1, chargeValues[0].length).setValues(chargeValues.slice(1));
+  }
+
+  // Conta: fica a do número certo. Se só existia a do número antigo, ela muda de número.
+  var account = '';
+  if (fromClient && toClient) {
+    sheet_('clients').deleteRow(fromClient.rowNumber);
+    toClient = findClient_(to);
+    toClient.name = name;
+    toClient.contact = contact || toClient.contact;
+    writeRow_('clients', toClient.rowNumber, clientRow_(toClient));
+    account = 'Ficou só a conta do WhatsApp ' + to + ' (a do número antigo foi removida).';
+  } else if (fromClient) {
+    fromClient.whatsapp = to;
+    fromClient.name = name;
+    fromClient.contact = contact || fromClient.contact;
+    writeRow_('clients', fromClient.rowNumber, clientRow_(fromClient));
+    if (to !== from) account = 'A conta dela agora entra com o WhatsApp ' + to + ' (mesma senha).';
+  } else if (toClient) {
+    toClient.name = name;
+    toClient.contact = contact || toClient.contact;
+    writeRow_('clients', toClient.rowNumber, clientRow_(toClient));
+  }
+  return { ok: true, orders: changed, merged: merging, whatsapp: to, name: name, account: account };
+}
+
+// Apaga só o login (os pedidos continuam)
+function actionAdminDeleteAccount_(params) {
+  var client = findClient_(phone_(params.whatsapp));
+  if (!client) throw userError_('Não existe conta com esse WhatsApp.');
+  sheet_('clients').deleteRow(client.rowNumber);
+  return { ok: true };
+}
+
+// ----------------------------------------------------------------------------
+// CORRIGIR VALORES JÁ LANÇADOS
+// ----------------------------------------------------------------------------
+
+// Cobrança: valor, descrição e vencimento
+function actionAdminUpdateCharge_(params) {
+  var charge = findCharge_(params.chargeId);
+  var order = findOrder_(charge.orderId);
+  var changes = [];
+  if (params.amount !== undefined && params.amount !== '') {
+    var amount = money_(params.amount);
+    if (amount <= 0) throw userError_('Informe um valor maior que zero.');
+    if (amount !== charge.amount) changes.push(charge.description + ': ' + brl_(charge.amount) + ' → ' + brl_(amount));
+    charge.amount = amount;
+  }
+  if (params.description !== undefined) {
+    var description = str_(params.description).slice(0, 120);
+    if (!description) throw userError_('Informe a descrição.');
+    if (description !== charge.description) changes.push('descrição: "' + charge.description + '" → "' + description + '"');
+    charge.description = description;
+  }
+  if (params.dueDate !== undefined) {
+    var due = dateKey_(params.dueDate);
+    if (due !== charge.dueDate) changes.push('vencimento de ' + charge.description + ': ' + (dateText_(charge.dueDate) || 'sem') + ' → ' + (dateText_(due) || 'sem'));
+    charge.dueDate = due;
+  }
+  if (!changes.length) throw userError_('Nada mudou.');
+  writeRow_('charges', charge.rowNumber, chargeRow_(charge));
+  addHistory_(order, 'cobrança corrigida — ' + changes.join('; '));
+  writeRow_('orders', order.rowNumber, orderRow_(order));
+  return { ok: true, charge: strip_(charge) };
+}
+
+// Item do pedido: produto, quantidade e valor unitário
+function actionAdminUpdateOrder_(params) {
+  var order = findOrder_(params.orderId);
+  var changes = [];
+  var name = params.productName !== undefined ? str_(params.productName).slice(0, 150) : order.productName;
+  if (!name) throw userError_('Informe o nome do produto.');
+  var quantity = params.quantity !== undefined && params.quantity !== '' ? Math.floor(num_(params.quantity)) : order.quantity;
+  var unitPrice = params.unitPrice !== undefined && params.unitPrice !== '' ? money_(params.unitPrice) : order.unitPrice;
+  if (quantity < 1) throw userError_('Quantidade inválida.');
+  if (unitPrice <= 0) throw userError_('Informe um valor maior que zero.');
+
+  if (quantity > order.quantity && order.status !== 'Cancelado') {
+    var product = null;
+    allProducts_().forEach(function (p) { if (p.id === order.productId) product = p; });
+    if (product && product.active) {
+      var available = Math.max(0, product.totalStock - (soldMap_(allOrders_())[product.id] || 0));
+      if (quantity - order.quantity > available) throw userError_('Não há estoque para aumentar a quantidade (restam ' + available + ').');
+    }
+  }
+  if (name !== order.productName) changes.push('produto: "' + order.productName + '" → "' + name + '"');
+  if (quantity !== order.quantity) changes.push('quantidade: ' + order.quantity + ' → ' + quantity);
+  if (unitPrice !== order.unitPrice) changes.push('valor unitário: ' + brl_(order.unitPrice) + ' → ' + brl_(unitPrice));
+  if (!changes.length) throw userError_('Nada mudou.');
+
+  var oldTotal = order.itemTotal;
+  order.productName = name;
+  order.quantity = quantity;
+  order.unitPrice = unitPrice;
+  order.itemTotal = money_(unitPrice * quantity);
+
+  // Ajusta a cobrança do item, se ela for única e ainda estiver pendente
+  var adjusted = null;
+  if (params.adjustCharge !== false && order.itemTotal !== oldTotal) {
+    var itemCharges = orderCharges_(order).filter(function (c) {
+      return c.status !== 'Cancelada' && /^(1ª fase|pix parcelado|parcela)/i.test(c.description);
+    });
+    if (itemCharges.length === 1 && itemCharges[0].status === 'Pendente') {
+      adjusted = itemCharges[0];
+      changes.push('cobrança do item: ' + brl_(adjusted.amount) + ' → ' + brl_(order.itemTotal));
+      adjusted.amount = order.itemTotal;
+      writeRow_('charges', adjusted.rowNumber, chargeRow_(adjusted));
+    }
+  }
+  addHistory_(order, 'item corrigido — ' + changes.join('; '));
+  writeRow_('orders', order.rowNumber, orderRow_(order));
+  return { ok: true, order: strip_(order), adjustedCharge: adjusted ? strip_(adjusted) : null };
 }

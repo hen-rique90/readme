@@ -13,6 +13,8 @@ export class ApiError extends Error {
     this.loginRequired = !!data.loginRequired; // precisa entrar na conta para o claim
     this.sessionExpired = !!data.sessionExpired; // token da compradora não vale mais
     this.needsCode = !!data.needsCode; // criar conta pede o código de um pedido
+    this.conflict = !!data.conflict; // WhatsApp novo já é de outra compradora
+    this.conflictNames = data.conflictNames || [];
   }
 }
 

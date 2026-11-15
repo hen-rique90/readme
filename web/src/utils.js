@@ -221,3 +221,35 @@ export const phoneConflicts = (orders, clients = []) => {
     .filter(Boolean)
     .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'diferente' ? -1 : 1));
 };
+
+// ---- Mesmo nome, WhatsApp diferente (pode ser a mesma pessoa com dois números)
+const fullPlain = (n) =>
+  String(n || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+export const sameNameGroups = (orders, clients = []) => {
+  const byPhone = {};
+  const add = (whatsapp, name, contact, isAccount) => {
+    if (!whatsapp || !fullPlain(name)) return;
+    const b = (byPhone[whatsapp] = byPhone[whatsapp] || { whatsapp, name, contact: contact || '', orders: 0, account: false });
+    if (isAccount) b.account = true;
+    else b.orders++;
+    if (!b.contact && contact) b.contact = contact;
+  };
+  orders.forEach((o) => add(o.whatsapp, o.buyerName, o.contact, false));
+  clients.forEach((c) => add(c.whatsapp, c.name, c.contact, true));
+  const byName = {};
+  Object.values(byPhone).forEach((b) => {
+    const key = fullPlain(b.name);
+    (byName[key] = byName[key] || []).push(b);
+  });
+  return Object.entries(byName)
+    .filter(([, list]) => list.length > 1)
+    .map(([key, list]) => ({ key: `${key}|${list.map((b) => b.whatsapp).sort().join(',')}`, name: list[0].name, buyers: list }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+};
