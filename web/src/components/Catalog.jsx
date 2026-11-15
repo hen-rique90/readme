@@ -3,7 +3,7 @@ import { ChevronRight, Filter, Package, RefreshCw, Search, Sparkles } from 'luci
 import { CATEGORIES, MEMBERS, formatBRL, formatDay, memberBadgeColor, splitInstallments } from '../utils';
 import { ProductImage, Spinner } from './common';
 
-export default function Catalog({ products, config, loading, error, onRefresh, onClaim }) {
+export default function Catalog({ products, config, loading, error, session, busyId, onRefresh, onClaim }) {
   const [category, setCategory] = useState('Todos');
   const [member, setMember] = useState('Todos');
   const [batch, setBatch] = useState('Todos');
@@ -156,7 +156,7 @@ export default function Catalog({ products, config, loading, error, onRefresh, o
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {filtered.map((p) => (
-            <ProductCard key={p.id} product={p} canClaim={config?.claimsOpen} onClaim={() => onClaim(p)} />
+            <ProductCard key={p.id} product={p} canClaim={config?.claimsOpen} loggedIn={!!session} busy={busyId === p.id} onClaim={() => onClaim(p)} />
           ))}
         </div>
       )}
@@ -164,7 +164,7 @@ export default function Catalog({ products, config, loading, error, onRefresh, o
   );
 }
 
-function ProductCard({ product: p, canClaim, onClaim }) {
+function ProductCard({ product: p, canClaim, loggedIn, busy, onClaim }) {
   const soldOut = p.available <= 0;
   const pct = p.totalStock > 0 ? Math.min(100, Math.round((p.sold / p.totalStock) * 100)) : 100;
   return (
@@ -224,7 +224,7 @@ function ProductCard({ product: p, canClaim, onClaim }) {
           {p.dueDate && <span className="block text-[11px] text-slate-500">Pagar até {formatDay(p.dueDate)}</span>}
         </div>
         <button
-          disabled={soldOut || !canClaim}
+          disabled={soldOut || !canClaim || busy}
           onClick={onClaim}
           className={`px-4 py-3 rounded-2xl font-bold text-sm flex items-center gap-1.5 transition ${
             soldOut || !canClaim
@@ -232,7 +232,7 @@ function ProductCard({ product: p, canClaim, onClaim }) {
               : 'bg-gradient-to-r from-purple-700 to-fuchsia-600 hover:from-purple-800 hover:to-fuchsia-700 text-white shadow-md shadow-purple-200 active:scale-95'
           }`}
         >
-          {soldOut ? 'Indisponível' : !canClaim ? 'Fechado' : (<>Solicitar / Claim <ChevronRight className="w-4 h-4" /></>)}
+          {soldOut ? 'Indisponível' : !canClaim ? 'Fechado' : busy ? (<><Spinner className="w-4 h-4" /> Reservando</>) : loggedIn ? 'Quero esse! 💜' : (<>Solicitar / Claim <ChevronRight className="w-4 h-4" /></>)}
         </button>
       </div>
     </div>

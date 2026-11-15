@@ -4,23 +4,27 @@ import { api, IS_DEMO } from '../api';
 import { chargeStatusColor, formatBRL, formatDate, formatDay, formatPhone, isOverdue, loadBuyer, orderStatusColor, saveBuyer, waLink } from '../utils';
 import { Badge, DueBadge, PixBox, ProductImage, Spinner } from './common';
 
-export default function MyOrders({ config }) {
+export default function MyOrders({ config, session, onLogin, onSessionExpired }) {
   const remembered = loadBuyer();
   const [whatsapp, setWhatsapp] = useState(remembered.whatsapp || '');
   const [code, setCode] = useState(remembered.lastCode || '');
   const [data, setData] = useState(null);
-  const autoLogin = !!(remembered.whatsapp && remembered.lastCode);
+  const autoLogin = !!session || !!(remembered.whatsapp && remembered.lastCode);
   const [loading, setLoading] = useState(autoLogin);
   const [error, setError] = useState('');
+  const token = session?.token;
 
   const lookup = async (w = whatsapp, c = code) => {
     setLoading(true);
     setError('');
     try {
-      const res = await api('myOrders', { whatsapp: w, code: c });
+      const res = token ? await api('myOrders', { token }) : await api('myOrders', { whatsapp: w, code: c });
       setData(res);
-      saveBuyer({ whatsapp: res.buyer.whatsapp, lastCode: c.toUpperCase().startsWith('PED-') ? c.toUpperCase() : `PED-${c.toUpperCase()}` });
+      if (!token && res.buyer) {
+        saveBuyer({ whatsapp: res.buyer.whatsapp, lastCode: c.toUpperCase().startsWith('PED-') ? c.toUpperCase() : `PED-${c.toUpperCase()}` });
+      }
     } catch (err) {
+      if (err.sessionExpired) return onSessionExpired();
       setError(err.message);
       setData(null);
     } finally {
@@ -28,11 +32,13 @@ export default function MyOrders({ config }) {
     }
   };
 
-  // Entra automaticamente se este aparelho já fez um claim
+  // Com conta: carrega direto. Sem conta: usa o último WhatsApp + código deste aparelho.
   useEffect(() => {
-    if (autoLogin) lookup(remembered.whatsapp, remembered.lastCode);
+    if (token) lookup();
+    else if (remembered.whatsapp && remembered.lastCode) lookup(remembered.whatsapp, remembered.lastCode);
+    else setData(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [token]);
 
   const fillDemo = () => {
     try {
@@ -73,6 +79,13 @@ export default function MyOrders({ config }) {
               Veja o que você comprou, o que já pagou e o que ainda falta pagar.
             </p>
           </div>
+          <button type="button" onClick={onLogin} className="btn-primary w-full py-3 mb-2">
+            Entrar na minha conta
+          </button>
+          <p className="text-[11px] text-center text-slate-400 mb-5">Com a conta você vê tudo sem precisar de código.</p>
+          <div className="flex items-center gap-3 mb-4 text-[11px] font-bold text-slate-400 uppercase">
+            <span className="flex-1 h-px bg-slate-200" /> ou consulte com o código <span className="flex-1 h-px bg-slate-200" />
+          </div>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -96,7 +109,7 @@ export default function MyOrders({ config }) {
                 <AlertCircle className="w-4 h-4 shrink-0" /> {error}
               </div>
             )}
-            <button type="submit" disabled={loading} className="btn-primary w-full py-3">
+            <button type="submit" disabled={loading} className="btn-soft w-full py-3">
               {loading ? <Spinner className="w-4 h-4" /> : null} Ver meus pedidos
             </button>
             {IS_DEMO && (
@@ -110,7 +123,8 @@ export default function MyOrders({ config }) {
     );
   }
 
-  const { buyer, orders, totals } = data;
+  const { orders, totals } = data;
+  const buyer = data.buyer || { name: session?.profile.name || '', contact: session?.profile.contact || '', whatsapp: session?.profile.whatsapp || '' };
   const pendingCharges = orders
     .flatMap((o) => o.charges.filter((c) => c.status === 'Pendente').map((c) => ({ ...c, order: o })))
     .sort((a, b) => (a.dueDate || '9999') < (b.dueDate || '9999') ? -1 : 1);
@@ -132,9 +146,11 @@ export default function MyOrders({ config }) {
           <button onClick={() => lookup()} className="btn-soft" disabled={loading}>
             {loading ? <Spinner className="w-3.5 h-3.5" /> : null} Atualizar
           </button>
-          <button onClick={logout} className="btn-soft">
-            <LogOut className="w-3.5 h-3.5" /> Sair
-          </button>
+          {!token && (
+            <button onClick={logout} className="btn-soft">
+              <LogOut className="w-3.5 h-3.5" /> Sair
+            </button>
+          )}
         </div>
       </div>
 
@@ -181,6 +197,9 @@ export default function MyOrders({ config }) {
 
       <div className="space-y-3">
         <h3 className="font-extrabold text-slate-800">Meus itens ({orders.length} pedido(s))</h3>
+        {orders.length === 0 && (
+          <div className="card p-8 text-center text-sm text-slate-500">Você ainda não tem pedidos. Seus claims vão aparecer aqui. 💜</div>
+        )}
         {orders.map((o) => (
           <div key={o.orderId} className={`card p-4 sm:p-5 ${o.status === 'Cancelado' ? 'opacity-60' : ''}`}>
             <div className="flex gap-3">

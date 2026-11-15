@@ -21,6 +21,14 @@ Ferramenta para anunciar os produtos da CEG. A compradora faz o claim e o item f
 - **Privacidade.** Cada compradora só vê os próprios pedidos (WhatsApp + código). O painel ADM exige senha.
 - **Cobranças em fases.** Ao fazer o claim, é criada a cobrança da *1ª fase* (valor do item). Fretes e taxas são lançados depois, por pedido ou para o lote inteiro.
 
+## Contas das compradoras
+- A compradora cria a conta com **nome, @, WhatsApp e senha** e fica logada no aparelho por 6 meses.
+- Logada, o botão do catálogo vira **"Quero esse! 💜"**: um toque reserva o item (produtos com Pix parcelado abrem a escolha à vista/parcelado). Logo depois dá para escrever uma observação ou **desfazer** o claim em até 15 minutos.
+- Quem **já comprou** antes (inclusive pedidos importados) precisa informar o **código de um pedido** para criar a conta — assim ninguém cria conta no número de outra pessoa.
+- **Esqueceu a senha?** ADM → Compradoras → "Senha temporária" → enviar pelo WhatsApp. No próximo acesso ela é obrigada a criar uma senha nova.
+- As senhas ficam na aba `Clientes` **protegidas (hash com sal)** — ninguém consegue lê-las. A sessão é um token assinado; trocar a senha encerra as sessões antigas.
+- Em **ADM → Configurações** dá para desligar "Exigir conta para fazer claim".
+
 ## Estrutura
 
 ```

@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ChevronDown, ChevronUp, Download, Edit3, Eye, EyeOff, Lock, LogOut, Package, Phone, Plus,
+  ChevronDown, ChevronUp, Download, Edit3, Eye, EyeOff, KeyRound, Lock, LogOut, Package, Phone, Plus,
   ReceiptText, RefreshCw, Settings, Trash2, Truck, Users
 } from 'lucide-react';
 import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
@@ -117,7 +117,7 @@ export default function Admin({ showToast, onCatalogChange }) {
       </div>
 
       {tab === 'orders' && <OrdersTab data={data} run={run} />}
-      {tab === 'buyers' && <BuyersTab data={data} />}
+      {tab === 'buyers' && <BuyersTab data={data} run={run} />}
       {tab === 'products' && <ProductsTab data={data} run={run} />}
       {tab === 'batch' && <BatchChargeTab data={data} run={run} />}
       {tab === 'settings' && <SettingsTab data={data} run={run} />}
@@ -406,8 +406,14 @@ function OrderDetails({ order, charges, run }) {
 
 // ---------------------------------------------------------------------------
 
-function BuyersTab({ data }) {
+function BuyersTab({ data, run }) {
   const [onlyOwing, setOnlyOwing] = useState(true);
+  const [temp, setTemp] = useState(null);
+  const accounts = useMemo(() => {
+    const map = {};
+    (data.clients || []).forEach((c) => { map[c.whatsapp] = c; });
+    return map;
+  }, [data.clients]);
   const [query, setQuery] = useState('');
   const chargesByOrder = useChargesByOrder(data.charges);
 
@@ -423,8 +429,11 @@ function BuyersTab({ data }) {
         } else if (c.status === 'Pago') b.paid += c.amount;
       });
     });
+    (data.clients || []).forEach((c) => {
+      if (!map[c.whatsapp]) map[c.whatsapp] = { whatsapp: c.whatsapp, name: c.name, contact: c.contact, items: 0, owed: 0, paid: 0, pending: [] };
+    });
     return Object.values(map).sort((a, b) => b.owed - a.owed || a.name.localeCompare(b.name));
-  }, [data.orders, chargesByOrder]);
+  }, [data.orders, data.clients, chargesByOrder]);
 
   const q = query.toLowerCase().trim();
   const list = buyers.filter((b) => (!onlyOwing || b.owed > 0) && (!q || `${b.name} ${b.contact} ${b.whatsapp}`.toLowerCase().includes(q)));
@@ -432,7 +441,16 @@ function BuyersTab({ data }) {
   const reminder = (b) =>
     `Oii ${b.name.split(' ')[0]}! 💜 Passando para lembrar dos pagamentos pendentes da CEG:\n\n` +
     b.pending.map((c) => `• ${c.order.orderId} — ${c.order.quantity}x ${c.order.productName}: ${c.description} (${formatBRL(c.amount)})${c.dueDate ? ` — até ${formatDay(c.dueDate)}${isOverdue(c) ? ' ⚠️ vencida' : ''}` : ''}`).join('\n') +
-    `\n\n*Total: ${formatBRL(b.owed)}*\nChave Pix: ${data.config.pixKey}\n\nVocê acompanha tudo em "Meus Pedidos" no site com seu WhatsApp + código ${b.pending[0]?.order.orderId || ''}.`;
+    `\n\n*Total: ${formatBRL(b.owed)}*\nChave Pix: ${data.config.pixKey}\n\n` +
+    (accounts[b.whatsapp]
+      ? `Você acompanha tudo em "Meus Pedidos" entrando na sua conta no site.`
+      : `Crie sua conta no site (botão "Entrar" → "Criar conta") com este WhatsApp e o código ${b.pending[0]?.order.orderId || ''} para acompanhar tudo em "Meus Pedidos".`);
+
+  const resetPassword = async (b) => {
+    if (!window.confirm(`Gerar uma senha temporária para ${b.name}? A senha atual dela deixa de funcionar.`)) return;
+    const res = await run('adminResetPassword', { whatsapp: b.whatsapp }, 'Senha temporária gerada');
+    if (res) setTemp(res);
+  };
 
   return (
     <div className="card overflow-hidden">
@@ -445,11 +463,33 @@ function BuyersTab({ data }) {
       </div>
       <div className="divide-y divide-purple-50">
         {list.length === 0 && <p className="p-8 text-center text-slate-400 text-sm">Ninguém por aqui. 🎉</p>}
+        {temp && (
+          <Modal onClose={() => setTemp(null)}>
+            <div className="space-y-3 text-center">
+              <h3 className="text-lg font-extrabold text-slate-800 pr-8">Senha temporária de {temp.name}</h3>
+              <p className="text-3xl font-black font-mono text-purple-900 tracking-wider">{temp.tempPassword}</p>
+              <p className="text-xs text-slate-500">Ela entra com essa senha e o site pede para criar uma nova na hora. Esta tela não mostra a senha de novo.</p>
+              <a
+                href={waLink(temp.whatsapp, `Oii ${temp.name.split(' ')[0]}! 💜 Sua senha temporária da CEG é: ${temp.tempPassword}\nEntre no site com seu WhatsApp e essa senha — ele vai pedir para você criar uma senha nova.`)}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2"
+              >
+                <Phone className="w-4 h-4" /> Enviar pelo WhatsApp
+              </a>
+            </div>
+          </Modal>
+        )}
         {list.map((b) => (
           <div key={b.whatsapp} className="p-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <span className="font-bold text-slate-800">{b.name}</span>{' '}
-              <span className="text-xs text-purple-600 font-semibold">{b.contact}</span>
+              <span className="text-xs text-purple-600 font-semibold">{b.contact}</span>{' '}
+              {accounts[b.whatsapp] ? (
+                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">✓ tem conta</Badge>
+              ) : (
+                <Badge className="bg-slate-50 text-slate-500 border-slate-200">sem conta</Badge>
+              )}
               <span className="block text-xs text-slate-400">{formatPhone(b.whatsapp)} • {b.items} item(ns)</span>
             </div>
             <div className="flex items-center gap-4">
@@ -457,6 +497,11 @@ function BuyersTab({ data }) {
                 <span className="block text-emerald-700 font-bold">Pago {formatBRL(b.paid)}</span>
                 <span className={`font-black text-sm ${b.owed > 0 ? 'text-amber-600' : 'text-slate-400'}`}>Deve {formatBRL(b.owed)}</span>
               </div>
+              {accounts[b.whatsapp] && (
+                <button onClick={() => resetPassword(b)} className="btn-soft" title="Para quem esqueceu a senha">
+                  <KeyRound className="w-3.5 h-3.5" /> Senha temporária
+                </button>
+              )}
               {b.owed > 0 && (
                 <a href={waLink(b.whatsapp, reminder(b))} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold">
                   <Phone className="w-3.5 h-3.5" /> Cobrar
@@ -777,6 +822,13 @@ function SettingsTab({ data, run }) {
       <label className="flex items-center gap-3 p-3 rounded-xl bg-purple-50 cursor-pointer">
         <input type="checkbox" checked={!!form.claimsOpen} onChange={(e) => setForm({ ...form, claimsOpen: e.target.checked })} className="w-5 h-5 accent-purple-600" />
         <span className="text-sm font-bold text-purple-900">Claims abertos (desmarque para pausar as vendas)</span>
+      </label>
+      <label className="flex items-center gap-3 p-3 rounded-xl bg-purple-50 cursor-pointer">
+        <input type="checkbox" checked={!!form.requireLogin} onChange={(e) => setForm({ ...form, requireLogin: e.target.checked })} className="w-5 h-5 accent-purple-600" />
+        <span className="text-sm font-bold text-purple-900">
+          Exigir conta para fazer claim
+          <span className="block text-[11px] font-medium text-purple-700">Desmarcado: quem não tem conta também pode dar claim preenchendo nome, @ e WhatsApp.</span>
+        </span>
       </label>
       <div>
         <label className="label">Nome da loja</label>

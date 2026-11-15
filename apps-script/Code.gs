@@ -17,14 +17,16 @@ var SHEETS = {
   config: 'Config',
   products: 'Produtos',
   orders: 'Pedidos',
-  charges: 'Cobranças'
+  charges: 'Cobranças',
+  clients: 'Clientes'
 };
 
 var HEADERS = {
   config: ['Chave', 'Valor', 'Descrição'],
   products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo', 'Prazo Pagamento', 'Datas Pix Parcelado'],
   orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento', 'Obs. da compradora'],
-  charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento']
+  charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento'],
+  clients: ['WhatsApp', 'Nome', '@ (Insta/Twitter)', 'Senha (protegida)', 'Sal', 'Criada em', 'Último acesso', 'Trocar senha']
 };
 
 // Colunas que precisam ser texto puro (evita o Sheets transformar telefone em número)
@@ -32,7 +34,8 @@ var TEXT_COLUMNS = {
   config: [2],
   products: [1, 10, 11],
   orders: [1, 3, 9],
-  charges: [1, 2, 3, 9]
+  charges: [1, 2, 3, 9],
+  clients: [1, 4, 5]
 };
 
 var DEFAULT_CONFIG = [
@@ -43,16 +46,17 @@ var DEFAULT_CONFIG = [
   ['noticeBanner', '💜 CEG aberta! Fez o claim, o item já é seu.', 'Aviso no topo do site'],
   ['claimsOpen', 'SIM', 'SIM = claims abertos | NÃO = só visualização'],
   ['maxPerClaim', '5', 'Quantidade máxima de unidades por claim'],
+  ['requireLogin', 'SIM', 'SIM = a compradora precisa ter conta para fazer claim'],
   ['adminPassword', 'TROQUE-ESTA-SENHA', 'Senha do Painel ADM (nunca é enviada ao site)']
 ];
 
 var DEFAULT_PASSWORD = 'TROQUE-ESTA-SENHA';
-var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'noticeBanner', 'claimsOpen', 'maxPerClaim'];
+var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'noticeBanner', 'claimsOpen', 'maxPerClaim', 'requireLogin'];
 
 var ORDER_STATUSES = ['Reservado', 'Comprado', 'A caminho do Brasil', 'Chegou (na bag)', 'Enviado', 'Entregue', 'Cancelado'];
 var CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 var SHIPPING_OPTIONS = ['Guardar na bag', 'Enviar assim que chegar'];
-var SCHEMA_VERSION = '3';
+var SCHEMA_VERSION = '4';
 
 // ----------------------------------------------------------------------------
 // ENTRADAS HTTP
@@ -80,7 +84,14 @@ function respond_(obj) {
 var PUBLIC_ACTIONS = {
   catalog: actionCatalog_,
   claim: actionClaim_,
-  myOrders: actionMyOrders_
+  myOrders: actionMyOrders_,
+  register: actionRegister_,
+  login: actionLogin_,
+  me: actionMe_,
+  updateProfile: actionUpdateProfile_,
+  changePassword: actionChangePassword_,
+  updateMyOrder: actionUpdateMyOrder_,
+  cancelMyOrder: actionCancelMyOrder_
 };
 
 var ADMIN_ACTIONS = {
@@ -94,13 +105,16 @@ var ADMIN_ACTIONS = {
   addCharge: actionAddCharge_,
   addBatchCharge: actionAddBatchCharge_,
   deleteCharge: actionDeleteCharge_,
-  saveConfig: actionSaveConfig_
+  saveConfig: actionSaveConfig_,
+  adminResetPassword: actionAdminResetPassword_
 };
 
 // Ações que alteram a planilha e precisam da trava
 var WRITE_ACTIONS = {
   claim: true, saveProduct: true, deleteProduct: true, setOrderStatus: true, setOrderNote: true,
-  setChargeStatus: true, addCharge: true, addBatchCharge: true, deleteCharge: true, saveConfig: true
+  setChargeStatus: true, addCharge: true, addBatchCharge: true, deleteCharge: true, saveConfig: true,
+  register: true, login: true, updateProfile: true, changePassword: true, updateMyOrder: true, cancelMyOrder: true,
+  adminResetPassword: true
 };
 
 function handle_(action, params) {
@@ -133,7 +147,13 @@ function handle_(action, params) {
       lock.releaseLock();
     }
   } catch (err) {
-    if (err && err.userMessage) return { ok: false, error: err.userMessage };
+    if (err && err.userMessage) {
+      var out = { ok: false, error: err.userMessage };
+      if (err.loginRequired) out.loginRequired = true;
+      if (err.sessionExpired) out.sessionExpired = true;
+      if (err.needsCode) out.needsCode = true;
+      return out;
+    }
     return { ok: false, error: 'Erro no servidor: ' + (err && err.message ? err.message : err) };
   }
 }
@@ -335,6 +355,7 @@ function publicConfig_() {
   var out = {};
   PUBLIC_CONFIG_KEYS.forEach(function (k) { out[k] = map[k] || ''; });
   out.claimsOpen = yes_(out.claimsOpen);
+  out.requireLogin = yes_(out.requireLogin);
   out.maxPerClaim = Math.max(1, Math.floor(num_(out.maxPerClaim) || 5));
   out.orderStatuses = ORDER_STATUSES;
   out.shippingOptions = SHIPPING_OPTIONS;
@@ -469,10 +490,17 @@ function actionClaim_(params) {
   var config = publicConfig_();
   if (!config.claimsOpen) throw userError_('Os claims estão fechados no momento.');
 
-  var buyerName = str_(params.buyerName).slice(0, 80);
-  var contact = str_(params.contact).slice(0, 60);
+  var client = params.token ? sessionClient_(params.token) : null;
+  if (params.token && !client) throw sessionError_();
+  if (!client && config.requireLogin) {
+    var e = userError_('Entre na sua conta (ou crie uma) para fazer o claim.');
+    e.loginRequired = true;
+    throw e;
+  }
+  var buyerName = client ? client.name : str_(params.buyerName).slice(0, 80);
+  var contact = client ? client.contact : str_(params.contact).slice(0, 60);
   var buyerNote = str_(params.buyerNote).replace(/\s+/g, ' ').slice(0, 300);
-  var whatsapp = phone_(params.whatsapp);
+  var whatsapp = client ? client.whatsapp : phone_(params.whatsapp);
   var quantity = Math.floor(num_(params.quantity));
   var shipping = SHIPPING_OPTIONS.indexOf(str_(params.shipping)) >= 0 ? str_(params.shipping) : SHIPPING_OPTIONS[0];
   var wantsInstallments = str_(params.paymentPlan) === 'parcelado';
@@ -550,14 +578,23 @@ function paymentPlan_(product, total, wantsInstallments) {
 
 // A compradora informa o WhatsApp + o código de QUALQUER pedido dela
 function actionMyOrders_(params) {
-  var whatsapp = phone_(params.whatsapp);
-  var code = str_(params.code).toUpperCase().replace(/\s/g, '');
-  if (code && code.indexOf('PED-') !== 0) code = 'PED-' + code;
-  if (whatsapp.length < 10 || !code) throw userError_('Informe seu WhatsApp e o código de um pedido seu.');
-
-  var mine = allOrders_().filter(function (o) { return o.whatsapp === whatsapp; });
-  var matches = mine.some(function (o) { return o.orderId === code; });
-  if (!matches) throw userError_('Não encontramos esse pedido para esse WhatsApp. Confira os dados.');
+  var whatsapp, mine;
+  if (params.token) {
+    var client = sessionClient_(params.token);
+    if (!client) throw sessionError_();
+    whatsapp = client.whatsapp;
+    mine = allOrders_().filter(function (o) { return o.whatsapp === whatsapp; });
+  } else {
+    whatsapp = phone_(params.whatsapp);
+    var code = normalizeCode_(params.code);
+    if (whatsapp.length < 10 || !code) throw userError_('Informe seu WhatsApp e o código de um pedido seu.');
+    mine = allOrders_().filter(function (o) { return o.whatsapp === whatsapp; });
+    var matches = mine.some(function (o) { return o.orderId === code; });
+    if (!matches) throw userError_('Não encontramos esse pedido para esse WhatsApp. Confira os dados.');
+  }
+  if (!mine.length) {
+    return { ok: true, buyer: null, orders: [], totals: { owed: 0, paid: 0, items: 0 }, config: publicConfig_() };
+  }
 
   var orderIds = {};
   mine.forEach(function (o) { orderIds[o.orderId] = true; });
@@ -602,7 +639,10 @@ function actionAdminData_() {
     config: config,
     products: allProducts_().map(function (p) { return withAvailability_(p, sold); }),
     orders: orders.map(strip_).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; }),
-    charges: allCharges_().map(strip_)
+    charges: allCharges_().map(strip_),
+    clients: readRows_('clients').map(toClient_).map(function (c) {
+      return { whatsapp: c.whatsapp, name: c.name, contact: c.contact, createdAt: c.createdAt, lastLogin: c.lastLogin, mustChange: c.mustChange };
+    })
   };
 }
 
@@ -800,11 +840,11 @@ function actionDeleteCharge_(params) {
 function actionSaveConfig_(params) {
   var input = params.config || {};
   var rows = readRows_('config');
-  var editable = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'noticeBanner', 'claimsOpen', 'maxPerClaim'];
+  var editable = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'noticeBanner', 'claimsOpen', 'maxPerClaim', 'requireLogin'];
   editable.forEach(function (key) {
     if (input[key] === undefined) return;
     var value = input[key];
-    if (key === 'claimsOpen') value = value ? 'SIM' : 'NÃO';
+    if (key === 'claimsOpen' || key === 'requireLogin') value = value ? 'SIM' : 'NÃO';
     if (key === 'maxPerClaim') value = String(Math.max(1, Math.floor(num_(value)) || 1));
     if (key === 'adminWhatsapp') value = str_(value).replace(/\D/g, '');
     value = str_(value).slice(0, 300);
@@ -814,4 +854,248 @@ function actionSaveConfig_(params) {
     else appendRow_('config', [key, value, '']);
   });
   return { ok: true, config: publicConfig_() };
+}
+
+// ----------------------------------------------------------------------------
+// CONTAS DAS COMPRADORAS (WhatsApp + senha)
+// ----------------------------------------------------------------------------
+// A senha nunca é guardada: só um "resumo" (hash) com sal, repetido várias vezes.
+// A sessão é um token assinado (HMAC) que vale 180 dias e deixa de valer se a
+// senha for trocada.
+
+var SESSION_DAYS = 180;
+var UNDO_MINUTES = 15;
+
+function normalizeCode_(v) {
+  var code = str_(v).toUpperCase().replace(/\s/g, '');
+  if (code && code.indexOf('PED-') !== 0) code = 'PED-' + code;
+  return code;
+}
+
+function b64_(bytes) {
+  return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/, '');
+}
+
+function hashPassword_(password, salt) {
+  var h = salt + '|' + password;
+  for (var i = 0; i < 300; i++) {
+    h = b64_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, h + salt, Utilities.Charset.UTF_8));
+  }
+  return h;
+}
+
+function randomToken_(n) {
+  var alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  var out = '';
+  for (var i = 0; i < n; i++) out += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+  return out;
+}
+
+function secret_() {
+  var props = PropertiesService.getScriptProperties();
+  var secret = props.getProperty('SESSION_SECRET');
+  if (!secret) {
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('SESSION_SECRET', secret);
+  }
+  return secret;
+}
+
+function sign_(payload, client) {
+  return b64_(Utilities.computeHmacSha256Signature(payload + '.' + client.hash, secret_(), Utilities.Charset.UTF_8));
+}
+
+function makeToken_(client) {
+  var payload = client.whatsapp + '.' + (Date.now() + SESSION_DAYS * 86400000).toString(36);
+  return payload + '.' + sign_(payload, client);
+}
+
+function toClient_(r) {
+  var v = r.v;
+  return {
+    rowNumber: r.rowNumber,
+    whatsapp: phone_(v[0]),
+    name: str_(v[1]),
+    contact: str_(v[2]),
+    hash: str_(v[3]),
+    salt: str_(v[4]),
+    createdAt: date_(v[5]),
+    lastLogin: date_(v[6]),
+    mustChange: str_(v[7]).toUpperCase() === 'SIM'
+  };
+}
+
+function clientRow_(c) {
+  return [c.whatsapp, c.name, c.contact, c.hash, c.salt, dateCell_(c.createdAt), dateCell_(c.lastLogin), c.mustChange ? 'SIM' : ''];
+}
+
+function findClient_(whatsapp) {
+  var found = null;
+  readRows_('clients').forEach(function (r) {
+    if (!found && phone_(r.v[0]) === whatsapp) found = toClient_(r);
+  });
+  return found;
+}
+
+function sessionClient_(token) {
+  var parts = str_(token).split('.');
+  if (parts.length !== 3) return null;
+  var expires = parseInt(parts[1], 36);
+  if (!expires || expires < Date.now()) return null;
+  var client = findClient_(parts[0]);
+  if (!client || !client.hash) return null;
+  return sign_(parts[0] + '.' + parts[1], client) === parts[2] ? client : null;
+}
+
+function sessionError_() {
+  var e = userError_('Sua sessão expirou. Entre de novo na sua conta.');
+  e.sessionExpired = true;
+  return e;
+}
+
+function profile_(c) {
+  return { name: c.name, contact: c.contact, whatsapp: c.whatsapp, mustChange: !!c.mustChange };
+}
+
+function checkPassword_(password) {
+  var p = String(password || '');
+  if (p.length < 6) throw userError_('A senha precisa ter pelo menos 6 caracteres.');
+  if (p.length > 100) throw userError_('Senha longa demais.');
+  return p;
+}
+
+function setPassword_(client, password, mustChange) {
+  client.salt = randomToken_(16);
+  client.hash = hashPassword_(password, client.salt);
+  client.mustChange = !!mustChange;
+}
+
+function actionRegister_(params) {
+  var name = str_(params.name).slice(0, 80);
+  var contact = str_(params.contact).slice(0, 60);
+  var whatsapp = phone_(params.whatsapp);
+  var password = checkPassword_(params.password);
+  if (name.length < 2) throw userError_('Informe seu nome.');
+  if (!contact) throw userError_('Informe seu @ do Instagram ou Twitter.');
+  if (whatsapp.length < 10 || whatsapp.length > 11) throw userError_('WhatsApp inválido. Use DDD + número, ex: 11988887777.');
+  if (findClient_(whatsapp)) throw userError_('Já existe uma conta com esse WhatsApp. Use "Entrar".');
+
+  // Quem já comprou precisa provar que o número é dela com o código de um pedido
+  var mine = allOrders_().filter(function (o) { return o.whatsapp === whatsapp; });
+  if (mine.length) {
+    var code = normalizeCode_(params.code);
+    if (!code) {
+      var e = userError_('Você já comprou com a gente! 💜 Para proteger seus pedidos, informe o código de um pedido seu.');
+      e.needsCode = true;
+      throw e;
+    }
+    if (!mine.some(function (o) { return o.orderId === code; })) {
+      var e2 = userError_('Esse código não é de um pedido desse WhatsApp. Confira ou fale com a ADM.');
+      e2.needsCode = true;
+      throw e2;
+    }
+  }
+
+  var now = new Date().toISOString();
+  var client = { whatsapp: whatsapp, name: name, contact: contact, createdAt: now, lastLogin: now };
+  setPassword_(client, password, false);
+  appendRow_('clients', clientRow_(client));
+  return { ok: true, token: makeToken_(client), profile: profile_(client) };
+}
+
+function actionLogin_(params) {
+  var whatsapp = phone_(params.whatsapp);
+  var cache = CacheService.getScriptCache();
+  var key = 'login_fail_' + whatsapp;
+  var fails = Number(cache.get(key) || 0);
+  if (fails >= 8) throw userError_('Muitas tentativas. Aguarde 15 minutos ou peça uma senha nova para a ADM.');
+
+  var client = findClient_(whatsapp);
+  if (!client || client.hash !== hashPassword_(String(params.password || ''), client.salt)) {
+    cache.put(key, String(fails + 1), 900);
+    throw userError_(client ? 'Senha incorreta.' : 'Não existe conta com esse WhatsApp. Toque em "Criar conta".');
+  }
+  cache.remove(key);
+  client.lastLogin = new Date().toISOString();
+  writeRow_('clients', client.rowNumber, clientRow_(client));
+  return { ok: true, token: makeToken_(client), profile: profile_(client) };
+}
+
+function actionMe_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  return { ok: true, profile: profile_(client) };
+}
+
+function actionUpdateProfile_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  var name = str_(params.name).slice(0, 80);
+  var contact = str_(params.contact).slice(0, 60);
+  if (name.length < 2) throw userError_('Informe seu nome.');
+  if (!contact) throw userError_('Informe seu @ do Instagram ou Twitter.');
+  client.name = name;
+  client.contact = contact;
+  writeRow_('clients', client.rowNumber, clientRow_(client));
+  return { ok: true, profile: profile_(client) };
+}
+
+function actionChangePassword_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  if (!client.mustChange && client.hash !== hashPassword_(String(params.currentPassword || ''), client.salt)) {
+    throw userError_('Senha atual incorreta.');
+  }
+  setPassword_(client, checkPassword_(params.newPassword), false);
+  writeRow_('clients', client.rowNumber, clientRow_(client));
+  return { ok: true, token: makeToken_(client), profile: profile_(client) };
+}
+
+function myOrder_(params) {
+  var client = sessionClient_(params.token);
+  if (!client) throw sessionError_();
+  var order = findOrder_(params.orderId);
+  if (order.whatsapp !== client.whatsapp) throw userError_('Esse pedido não é seu.');
+  return order;
+}
+
+// A compradora ajusta observação/envio enquanto o pedido está "Reservado"
+function actionUpdateMyOrder_(params) {
+  var order = myOrder_(params);
+  if (order.status !== 'Reservado') throw userError_('Esse pedido já está em andamento. Fale com a ADM.');
+  if (params.buyerNote !== undefined) order.buyerNote = str_(params.buyerNote).replace(/\s+/g, ' ').slice(0, 300);
+  if (params.shipping !== undefined && SHIPPING_OPTIONS.indexOf(str_(params.shipping)) >= 0) order.shipping = str_(params.shipping);
+  writeRow_('orders', order.rowNumber, orderRow_(order));
+  return { ok: true, order: strip_(order) };
+}
+
+// Desfazer um claim feito sem querer (até 15 min, sem nenhum pagamento confirmado)
+function actionCancelMyOrder_(params) {
+  var order = myOrder_(params);
+  if (order.status !== 'Reservado') throw userError_('Esse pedido já está em andamento. Fale com a ADM.');
+  var created = new Date(order.createdAt).getTime();
+  if (!created || Date.now() - created > UNDO_MINUTES * 60000) {
+    throw userError_('Só dá para desfazer nos primeiros ' + UNDO_MINUTES + ' minutos. Fale com a ADM.');
+  }
+  var charges = allCharges_().filter(function (c) { return c.orderId === order.orderId; });
+  if (charges.some(function (c) { return c.status === 'Pago'; })) throw userError_('Esse pedido já tem pagamento. Fale com a ADM.');
+  order.status = 'Cancelado';
+  order.note = (order.note ? order.note + ' | ' : '') + 'Desfeito pela compradora';
+  writeRow_('orders', order.rowNumber, orderRow_(order));
+  charges.forEach(function (c) {
+    if (c.status !== 'Pendente') return;
+    c.status = 'Cancelada';
+    writeRow_('charges', c.rowNumber, chargeRow_(c));
+  });
+  return { ok: true };
+}
+
+// ADM gera uma senha temporária (a compradora troca no próximo acesso)
+function actionAdminResetPassword_(params) {
+  var client = findClient_(phone_(params.whatsapp));
+  if (!client) throw userError_('Essa compradora ainda não criou conta.');
+  var temp = randomToken_(4).toLowerCase() + Math.floor(1000 + Math.random() * 9000);
+  setPassword_(client, temp, true);
+  writeRow_('clients', client.rowNumber, clientRow_(client));
+  return { ok: true, tempPassword: temp, whatsapp: client.whatsapp, name: client.name };
 }
