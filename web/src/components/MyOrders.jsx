@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock, LogOut, Package, Phone, ReceiptText } from 'lucide-react';
 import { api, IS_DEMO } from '../api';
-import { chargeStatusColor, formatBRL, formatDate, formatPhone, loadBuyer, orderStatusColor, saveBuyer, waLink } from '../utils';
-import { Badge, PixBox, ProductImage, Spinner } from './common';
+import { chargeStatusColor, formatBRL, formatDate, formatDay, formatPhone, isOverdue, loadBuyer, orderStatusColor, saveBuyer, waLink } from '../utils';
+import { Badge, DueBadge, PixBox, ProductImage, Spinner } from './common';
 
 export default function MyOrders({ config }) {
   const remembered = loadBuyer();
@@ -111,10 +111,13 @@ export default function MyOrders({ config }) {
   }
 
   const { buyer, orders, totals } = data;
-  const pendingCharges = orders.flatMap((o) => o.charges.filter((c) => c.status === 'Pendente').map((c) => ({ ...c, order: o })));
+  const pendingCharges = orders
+    .flatMap((o) => o.charges.filter((c) => c.status === 'Pendente').map((c) => ({ ...c, order: o })))
+    .sort((a, b) => (a.dueDate || '9999') < (b.dueDate || '9999') ? -1 : 1);
+  const overdue = pendingCharges.filter(isOverdue);
   const pixMessage =
     `Oii! 💜 Sou ${buyer.name} (${buyer.contact}).\nSegue o comprovante do Pix de ${formatBRL(totals.owed)} referente a:\n` +
-    pendingCharges.map((c) => `• ${c.order.orderId} — ${c.description} (${formatBRL(c.amount)})`).join('\n');
+    pendingCharges.map((c) => `• ${c.order.orderId} — ${c.description} (${formatBRL(c.amount)})${c.dueDate ? ` até ${formatDay(c.dueDate)}` : ''}`).join('\n');
 
   return (
     <main className="max-w-4xl mx-auto px-4 sm:px-6 pt-6 space-y-5">
@@ -144,12 +147,18 @@ export default function MyOrders({ config }) {
       {totals.owed > 0 && (
         <div className="card p-5 space-y-3 border-amber-200">
           <h3 className="font-extrabold text-slate-800">Pagamentos pendentes</h3>
+          {overdue.length > 0 && (
+            <p className="text-xs font-bold text-rose-700 bg-rose-50 rounded-xl px-3 py-2">
+              Você tem {overdue.length} pagamento(s) vencido(s), somando {formatBRL(overdue.reduce((a, c) => a + c.amount, 0))}.
+            </p>
+          )}
           <ul className="text-sm divide-y divide-amber-100">
             {pendingCharges.map((c) => (
               <li key={c.chargeId} className="py-2 flex justify-between gap-3">
                 <span className="text-slate-600">
                   <span className="font-mono text-xs text-purple-700 font-bold">{c.order.orderId}</span> · {c.description}
                   <span className="block text-xs text-slate-400">{c.order.quantity}x {c.order.productName}</span>
+                  <DueBadge charge={c} />
                 </span>
                 <span className="font-black text-amber-700 whitespace-nowrap">{formatBRL(c.amount)}</span>
               </li>
@@ -186,7 +195,7 @@ export default function MyOrders({ config }) {
                   {o.quantity}x {o.productName}
                 </h4>
                 <p className="text-xs text-slate-500">
-                  {o.batch} • {o.shipping}
+                  {o.batch} • {o.shipping}{o.payment ? ` • ${o.payment}` : ''}
                   {o.note ? ` • Obs: ${o.note}` : ''}
                 </p>
               </div>
@@ -195,7 +204,9 @@ export default function MyOrders({ config }) {
               <ul className="mt-3 pt-3 border-t border-purple-50 space-y-1.5">
                 {o.charges.map((c) => (
                   <li key={c.chargeId} className="flex items-center justify-between gap-2 text-xs">
-                    <span className="text-slate-600">{c.description}</span>
+                    <span className="text-slate-600">
+                      {c.description} <DueBadge charge={c} />
+                    </span>
                     <span className="flex items-center gap-2">
                       <span className={`font-bold ${c.status === 'Cancelada' ? 'line-through text-slate-400' : 'text-slate-800'}`}>
                         {formatBRL(c.amount)}

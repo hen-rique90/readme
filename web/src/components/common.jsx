@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { imageCandidates } from '../utils';
+import { formatDay, formatDayShort, imageCandidates, isOverdue } from '../utils';
 import { Check, Copy, Loader2, Sparkles, X } from 'lucide-react';
 
 export function Toast({ toast, onClose }) {
@@ -114,6 +114,48 @@ export function Modal({ onClose, children, wide = false }) {
         </button>
         {children}
       </div>
+    </div>
+  );
+}
+
+export function DueBadge({ charge }) {
+  if (!charge.dueDate || charge.status === 'Cancelada') return null;
+  if (charge.status === 'Pago') return <span className="text-[11px] text-slate-400">venc. {formatDay(charge.dueDate)}</span>;
+  return isOverdue(charge) ? (
+    <Badge className="bg-rose-100 text-rose-700 border-rose-200">Vencida {formatDayShort(charge.dueDate)}</Badge>
+  ) : (
+    <span className="text-[11px] font-semibold text-amber-700">até {formatDay(charge.dueDate)}</span>
+  );
+}
+
+// Caixinha para preencher as datas do Pix parcelado
+export function DateListInput({ value, onChange }) {
+  const dates = value || [];
+  const setAt = (i, v) => onChange(dates.map((d, j) => (j === i ? v : d)));
+  return (
+    <div className="space-y-2">
+      {dates.map((d, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <span className="text-xs font-bold text-purple-800 w-16 shrink-0">Parcela {i + 1}</span>
+          <input type="date" required value={d} onChange={(e) => setAt(i, e.target.value)} className="input py-2" />
+          <button
+            type="button"
+            onClick={() => onChange(dates.filter((_, j) => j !== i))}
+            className="p-2 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 shrink-0"
+            aria-label={`Remover parcela ${i + 1}`}
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...dates, ''])}
+        disabled={dates.length >= 12}
+        className="btn-soft w-full"
+      >
+        + Adicionar data de pagamento
+      </button>
     </div>
   );
 }

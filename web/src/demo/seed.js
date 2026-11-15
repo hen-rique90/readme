@@ -25,8 +25,17 @@ export function seedDemo(backend, gas, password) {
   set('noticeBanner', '💜 CEG #42 & #43 ABERTAS! Fez o claim, o item já é seu. (Modo demonstração)');
 
   const admin = (action, params) => backend.call(action, { ...params, password });
+  // Prazos e parcelas relativos à data de hoje, para a demonstração nunca "envelhecer"
+  const day = (offset) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return d.toISOString().slice(0, 10);
+  };
   PRODUCTS.forEach(([name, member, category, price, totalStock, image, batch]) => {
-    admin('saveProduct', { product: { isNew: true, name, member, category, price, totalStock, image, batch } });
+    const installmentDates = price >= 300 ? [day(15), day(45), day(75)] : [];
+    admin('saveProduct', {
+      product: { isNew: true, name, member, category, price, totalStock, image, batch, dueDate: day(15), installmentDates }
+    });
   });
 
   const claim = (productId, quantity, buyerName, contact, whatsapp) =>

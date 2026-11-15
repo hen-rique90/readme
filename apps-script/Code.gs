@@ -22,17 +22,17 @@ var SHEETS = {
 
 var HEADERS = {
   config: ['Chave', 'Valor', 'Descrição'],
-  products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo'],
-  orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação'],
-  charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em']
+  products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo', 'Prazo Pagamento', 'Datas Pix Parcelado'],
+  orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento'],
+  charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento']
 };
 
 // Colunas que precisam ser texto puro (evita o Sheets transformar telefone em número)
 var TEXT_COLUMNS = {
   config: [2],
-  products: [1],
+  products: [1, 10, 11],
   orders: [1, 3, 9],
-  charges: [1, 2, 3]
+  charges: [1, 2, 3, 9]
 };
 
 var DEFAULT_CONFIG = [
@@ -52,6 +52,7 @@ var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'no
 var ORDER_STATUSES = ['Reservado', 'Comprado', 'A caminho do Brasil', 'Chegou (na bag)', 'Enviado', 'Entregue', 'Cancelado'];
 var CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 var SHIPPING_OPTIONS = ['Guardar na bag', 'Enviar assim que chegar'];
+var SCHEMA_VERSION = '2';
 
 // ----------------------------------------------------------------------------
 // ENTRADAS HTTP
@@ -169,9 +170,14 @@ function checkAdmin_(password) {
 
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var cache = CacheService.getScriptCache();
+  var migrated = cache.get('schema') === SCHEMA_VERSION;
   Object.keys(SHEETS).forEach(function (key) {
     var sheet = ss.getSheetByName(SHEETS[key]);
-    if (sheet) return;
+    if (sheet) {
+      if (!migrated) addMissingColumns_(sheet, key);
+      return;
+    }
     sheet = ss.insertSheet(SHEETS[key]);
     var headers = HEADERS[key];
     sheet.getRange(1, 1, 1, headers.length).setValues([headers])
@@ -184,6 +190,25 @@ function setup() {
       sheet.getRange(2, 1, DEFAULT_CONFIG.length, 3).setValues(DEFAULT_CONFIG);
     }
   });
+  if (!migrated) markMigrated_();
+}
+
+// Planilhas criadas por versões anteriores ganham as colunas novas no cabeçalho
+function addMissingColumns_(sheet, key) {
+  var headers = HEADERS[key];
+  var current = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  for (var col = 1; col <= headers.length; col++) {
+    if (String(current[col - 1] || '').trim() !== '') continue;
+    sheet.getRange(1, col, 1, 1).setValues([[headers[col - 1]]])
+      .setFontWeight('bold').setBackground('#7c3aed').setFontColor('#ffffff');
+    if ((TEXT_COLUMNS[key] || []).indexOf(col) >= 0) {
+      sheet.getRange(1, col, sheet.getMaxRows(), 1).setNumberFormat('@');
+    }
+  }
+}
+
+function markMigrated_() {
+  CacheService.getScriptCache().put('schema', SCHEMA_VERSION, 21600);
 }
 
 function sheet_(key) {
@@ -242,6 +267,37 @@ function date_(v) {
   return str_(v);
 }
 
+// Datas trafegam como 'aaaa-mm-dd'. Na planilha ficam como 'dd/mm/aaaa'.
+function pad2_(n) { return ('0' + n).slice(-2); }
+
+function dateKey_(v) {
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return '';
+    return v.getFullYear() + '-' + pad2_(v.getMonth() + 1) + '-' + pad2_(v.getDate());
+  }
+  var s = str_(v);
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  if (m) return m[3] + '-' + pad2_(m[2]) + '-' + pad2_(m[1]);
+  return '';
+}
+
+function dateText_(key) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key || '');
+  return m ? m[3] + '/' + m[2] + '/' + m[1] : '';
+}
+
+function dateList_(v) {
+  var list = Array.isArray(v) ? v : str_(v).split(/[;,\n]+/);
+  var seen = {};
+  return list.map(dateKey_).filter(function (k) {
+    if (!k || seen[k]) return false;
+    seen[k] = true;
+    return true;
+  }).sort();
+}
+
 function yes_(v) {
   var s = str_(v).toUpperCase();
   return s === '' || s === 'SIM' || s === 'S' || s === 'TRUE' || s === 'VERDADEIRO' || s === 'YES';
@@ -297,12 +353,15 @@ function toProduct_(r) {
     totalStock: Math.max(0, Math.floor(num_(v[5]))),
     image: str_(v[6]),
     batch: str_(v[7]),
-    active: yes_(v[8])
+    active: yes_(v[8]),
+    dueDate: dateKey_(v[9]),
+    installmentDates: dateList_(v[10])
   };
 }
 
 function productRow_(p) {
-  return [p.id, p.name, p.member, p.category, p.price, p.totalStock, p.image, p.batch, p.active ? 'SIM' : 'NÃO'];
+  return [p.id, p.name, p.member, p.category, p.price, p.totalStock, p.image, p.batch, p.active ? 'SIM' : 'NÃO',
+    dateText_(p.dueDate), (p.installmentDates || []).map(dateText_).join('; ')];
 }
 
 function toOrder_(r) {
@@ -323,13 +382,15 @@ function toOrder_(r) {
     itemTotal: money_(v[11]),
     shipping: str_(v[12]),
     status: str_(v[13]) || 'Reservado',
-    note: str_(v[14])
+    note: str_(v[14]),
+    payment: str_(v[15])
   };
 }
 
 function orderRow_(o) {
   return [o.orderId, dateCell_(o.createdAt), o.productId, o.productName,
-    o.member, o.batch, o.buyerName, o.contact, o.whatsapp, o.quantity, o.unitPrice, o.itemTotal, o.shipping, o.status, o.note];
+    o.member, o.batch, o.buyerName, o.contact, o.whatsapp, o.quantity, o.unitPrice, o.itemTotal, o.shipping, o.status, o.note,
+    o.payment || ''];
 }
 
 function toCharge_(r) {
@@ -343,13 +404,14 @@ function toCharge_(r) {
     amount: money_(v[4]),
     status: str_(v[5]) || 'Pendente',
     createdAt: date_(v[6]),
-    paidAt: date_(v[7])
+    paidAt: date_(v[7]),
+    dueDate: dateKey_(v[8])
   };
 }
 
 function chargeRow_(c) {
   return [c.chargeId, c.orderId, c.whatsapp, c.description, c.amount, c.status,
-    dateCell_(c.createdAt), dateCell_(c.paidAt)];
+    dateCell_(c.createdAt), dateCell_(c.paidAt), dateText_(c.dueDate)];
 }
 
 function strip_(obj) {
@@ -411,6 +473,7 @@ function actionClaim_(params) {
   var whatsapp = phone_(params.whatsapp);
   var quantity = Math.floor(num_(params.quantity));
   var shipping = SHIPPING_OPTIONS.indexOf(str_(params.shipping)) >= 0 ? str_(params.shipping) : SHIPPING_OPTIONS[0];
+  var wantsInstallments = str_(params.paymentPlan) === 'parcelado';
 
   if (buyerName.length < 2) throw userError_('Informe seu nome.');
   if (!contact) throw userError_('Informe seu @ do Instagram ou Twitter.');
@@ -445,26 +508,41 @@ function actionClaim_(params) {
     itemTotal: money_(product.price * quantity),
     shipping: shipping,
     status: 'Reservado',
-    note: ''
+    note: '',
+    payment: ''
   };
+  var plan = paymentPlan_(product, order.itemTotal, wantsInstallments);
+  order.payment = plan.label;
   appendRow_('orders', orderRow_(order));
 
-  var chargeIds = {};
-  allCharges_().forEach(function (c) { chargeIds[c.chargeId] = true; });
-  var charge = {
-    chargeId: newId_('COB-', chargeIds),
-    orderId: order.orderId,
-    whatsapp: whatsapp,
-    description: '1ª fase — valor do item',
-    amount: order.itemTotal,
-    status: 'Pendente',
-    createdAt: now.toISOString(),
-    paidAt: ''
-  };
-  appendRow_('charges', chargeRow_(charge));
+  var ids = chargeIds_();
+  var charges = plan.parts.map(function (part) {
+    return newCharge_(order, part.description, part.amount, ids, part.dueDate);
+  });
 
   order.createdAt = now.toISOString();
-  return { ok: true, order: order, charge: charge, available: available - quantity };
+  return { ok: true, order: order, charge: charges[0], charges: charges, available: available - quantity };
+}
+
+// Divide o valor do item conforme a forma de pagamento escolhida
+function paymentPlan_(product, total, wantsInstallments) {
+  var dates = product.installmentDates || [];
+  if (wantsInstallments && dates.length >= 2) {
+    var n = dates.length;
+    var each = Math.floor((total / n) * 100) / 100;
+    var parts = [];
+    var acc = 0;
+    for (var i = 0; i < n; i++) {
+      var amount = i === n - 1 ? money_(total - acc) : each;
+      acc = money_(acc + amount);
+      parts.push({ description: 'Pix parcelado — parcela ' + (i + 1) + '/' + n, amount: amount, dueDate: dates[i] });
+    }
+    return { label: 'Pix parcelado ' + n + 'x', parts: parts };
+  }
+  return {
+    label: 'Pix à vista',
+    parts: [{ description: '1ª fase — valor do item', amount: total, dueDate: product.dueDate || '' }]
+  };
 }
 
 // A compradora informa o WhatsApp + o código de QUALQUER pedido dela
@@ -541,8 +619,14 @@ function actionSaveProduct_(params) {
     totalStock: Math.floor(num_(input.totalStock)),
     image: str_(input.image),
     batch: str_(input.batch) || 'CEG Atual',
-    active: input.active === undefined ? true : !!input.active
+    active: input.active === undefined ? true : !!input.active,
+    dueDate: dateKey_(input.dueDate),
+    installmentDates: dateList_(input.installmentDates || [])
   };
+  if (product.installmentDates.length === 1) {
+    throw userError_('O Pix parcelado precisa de pelo menos 2 datas. Para uma data só, use o prazo para pagamento.');
+  }
+  if (product.installmentDates.length > 12) throw userError_('Máximo de 12 parcelas.');
   if (!product.name) throw userError_('Informe o nome do produto.');
   if (product.price <= 0) throw userError_('Informe um preço maior que zero.');
   if (product.totalStock < 0) throw userError_('Estoque inválido.');
@@ -648,7 +732,7 @@ function actionSetChargeStatus_(params) {
   return { ok: true };
 }
 
-function newCharge_(order, description, amount, existingIds) {
+function newCharge_(order, description, amount, existingIds, dueDate) {
   var charge = {
     chargeId: newId_('COB-', existingIds),
     orderId: order.orderId,
@@ -657,7 +741,8 @@ function newCharge_(order, description, amount, existingIds) {
     amount: money_(amount),
     status: 'Pendente',
     createdAt: new Date().toISOString(),
-    paidAt: ''
+    paidAt: '',
+    dueDate: dateKey_(dueDate)
   };
   existingIds[charge.chargeId] = true;
   appendRow_('charges', chargeRow_(charge));
@@ -677,7 +762,7 @@ function actionAddCharge_(params) {
   var amount = money_(params.amount);
   if (!description) throw userError_('Descreva a cobrança (ex: Frete internacional).');
   if (amount <= 0) throw userError_('Informe um valor maior que zero.');
-  return { ok: true, charge: newCharge_(order, description, amount, chargeIds_()) };
+  return { ok: true, charge: newCharge_(order, description, amount, chargeIds_(), params.dueDate) };
 }
 
 // Lança a mesma cobrança (por unidade) para todos os pedidos ativos de um lote
@@ -694,7 +779,7 @@ function actionAddBatchCharge_(params) {
   var total = 0;
   allOrders_().forEach(function (o) {
     if (o.batch !== batch || o.status === 'Cancelado') return;
-    var c = newCharge_(o, description, perUnit * o.quantity, ids);
+    var c = newCharge_(o, description, perUnit * o.quantity, ids, params.dueDate);
     count++;
     total += c.amount;
   });

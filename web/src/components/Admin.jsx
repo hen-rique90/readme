@@ -6,9 +6,9 @@ import {
 import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
 import {
   CATEGORIES, MEMBERS, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone,
-  isAlbumLink, memberBadgeColor, orderStatusColor, waLink
+  formatDay, formatDayShort, isAlbumLink, isOverdue, memberBadgeColor, orderStatusColor, splitInstallments, waLink
 } from '../utils';
-import { Badge, Modal, ProductImage, Spinner } from './common';
+import { Badge, DateListInput, DueBadge, Modal, ProductImage, Spinner } from './common';
 
 const PASS_KEY = 'ceg_adm_senha';
 const CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
@@ -275,7 +275,7 @@ function OrdersTab({ data, run }) {
                     </td>
                     <td className="py-3 px-3">
                       <span className="font-semibold text-slate-800">{o.quantity}x {o.productName}</span>
-                      <span className="block text-[11px] text-slate-400">#{o.productId} • {o.batch} • {o.shipping}</span>
+                      <span className="block text-[11px] text-slate-400">#{o.productId} • {o.batch} • {o.shipping}{o.payment ? ` • ${o.payment}` : ''}</span>
                     </td>
                     <td className="py-3 px-3 whitespace-nowrap">
                       <span className="block text-emerald-700 font-bold">{formatBRL(paid)}</span>
@@ -321,6 +321,7 @@ function OrdersTab({ data, run }) {
 function OrderDetails({ order, charges, run }) {
   const [desc, setDesc] = useState('Frete internacional');
   const [amount, setAmount] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const [note, setNote] = useState(order.note);
   return (
     <div className="grid lg:grid-cols-2 gap-4">
@@ -334,6 +335,7 @@ function OrderDetails({ order, charges, run }) {
               <span className="block text-[11px] text-slate-400">
                 {c.chargeId} • criada {formatDate(c.createdAt)}{c.paidAt ? ` • paga ${formatDate(c.paidAt)}` : ''}
               </span>
+              <DueBadge charge={c} />
             </div>
             <div className="flex items-center gap-2">
               <span className="font-black text-slate-800">{formatBRL(c.amount)}</span>
@@ -363,7 +365,7 @@ function OrderDetails({ order, charges, run }) {
             className="bg-white rounded-xl p-3 border border-purple-100 space-y-2"
             onSubmit={async (e) => {
               e.preventDefault();
-              if (await run('addCharge', { orderId: order.orderId, description: desc, amount }, 'Cobrança adicionada')) setAmount('');
+              if (await run('addCharge', { orderId: order.orderId, description: desc, amount, dueDate }, 'Cobrança adicionada')) setAmount('');
             }}
           >
             <h4 className="font-extrabold text-slate-800 text-sm">Adicionar cobrança</h4>
@@ -371,6 +373,11 @@ function OrderDetails({ order, charges, run }) {
               <input value={desc} onChange={(e) => setDesc(e.target.value)} required placeholder="Ex: Frete nacional" className="input flex-1" />
               <input value={amount} onChange={(e) => setAmount(e.target.value)} required type="number" step="0.01" min="0.01" placeholder="R$" className="input w-28" />
             </div>
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              Pagar até
+              <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input py-1.5 w-auto" />
+              <span className="text-slate-400">(opcional)</span>
+            </label>
             <button className="btn-primary w-full"><Plus className="w-4 h-4" /> Adicionar</button>
           </form>
         )}
@@ -419,7 +426,7 @@ function BuyersTab({ data }) {
 
   const reminder = (b) =>
     `Oii ${b.name.split(' ')[0]}! 💜 Passando para lembrar dos pagamentos pendentes da CEG:\n\n` +
-    b.pending.map((c) => `• ${c.order.orderId} — ${c.order.quantity}x ${c.order.productName}: ${c.description} (${formatBRL(c.amount)})`).join('\n') +
+    b.pending.map((c) => `• ${c.order.orderId} — ${c.order.quantity}x ${c.order.productName}: ${c.description} (${formatBRL(c.amount)})${c.dueDate ? ` — até ${formatDay(c.dueDate)}${isOverdue(c) ? ' ⚠️ vencida' : ''}` : ''}`).join('\n') +
     `\n\n*Total: ${formatBRL(b.owed)}*\nChave Pix: ${data.config.pixKey}\n\nVocê acompanha tudo em "Meus Pedidos" no site com seu WhatsApp + código ${b.pending[0]?.order.orderId || ''}.`;
 
   return (
@@ -460,7 +467,10 @@ function BuyersTab({ data }) {
 
 // ---------------------------------------------------------------------------
 
-const EMPTY_PRODUCT = { id: '', name: '', member: 'OT7', category: 'Photocards', price: '', totalStock: 1, image: '', batch: '', active: true };
+const EMPTY_PRODUCT = {
+  id: '', name: '', member: 'OT7', category: 'Photocards', price: '', totalStock: 1, image: '', batch: '', active: true,
+  dueDate: '', parcelado: false, installmentDates: ['', '']
+};
 
 function ProductsTab({ data, run }) {
   const lastBatch = data.products[data.products.length - 1]?.batch || '';
@@ -471,13 +481,23 @@ function ProductsTab({ data, run }) {
 
   const reset = () => {
     setEditing(null);
-    setForm({ ...EMPTY_PRODUCT, batch: form.batch });
+    setForm({ ...EMPTY_PRODUCT, batch: form.batch, dueDate: form.dueDate });
   };
 
   const save = async (e) => {
     e.preventDefault();
     setSaving(true);
-    const res = await run('saveProduct', { product: { ...form, isNew: !editing } }, (r) => (editing ? 'Produto atualizado!' : `Item ${r.product.id} adicionado à CEG!`));
+    const product = {
+      ...form,
+      isNew: !editing,
+      installmentDates: form.parcelado ? form.installmentDates.filter(Boolean) : []
+    };
+    if (form.parcelado && product.installmentDates.length < 2) {
+      setSaving(false);
+      window.alert('Para o Pix parcelado, preencha pelo menos 2 datas.');
+      return;
+    }
+    const res = await run('saveProduct', { product }, (r) => (editing ? 'Produto atualizado!' : `Item ${r.product.id} adicionado à CEG!`));
     setSaving(false);
     if (res) reset();
   };
@@ -529,6 +549,32 @@ function ProductsTab({ data, run }) {
             <input required type="number" min="1" value={form.totalStock} onChange={set('totalStock')} className="input" />
           </div>
         </div>
+        <div className="rounded-2xl border border-purple-100 bg-purple-50/40 p-3 space-y-3">
+          <div>
+            <label className="label">Prazo para pagamento (Pix à vista)</label>
+            <input type="date" value={form.dueDate || ''} onChange={set('dueDate')} className="input" />
+            <p className="text-[11px] text-slate-400 mt-1">A compradora vê "pagar até" essa data, e a cobrança já nasce com esse vencimento.</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm font-bold text-purple-900 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!form.parcelado}
+              onChange={(e) => setForm({ ...form, parcelado: e.target.checked })}
+              className="w-4 h-4 accent-purple-600"
+            />
+            Aceita Pix parcelado
+          </label>
+          {form.parcelado && (
+            <div className="space-y-2">
+              <DateListInput value={form.installmentDates} onChange={(installmentDates) => setForm({ ...form, installmentDates })} />
+              {Number(form.price) > 0 && form.installmentDates.length >= 2 && (
+                <p className="text-[11px] text-purple-800 font-semibold">
+                  {form.installmentDates.length}x de {formatBRL(splitInstallments(Number(form.price), form.installmentDates.length)[0])} por unidade
+                </p>
+              )}
+            </div>
+          )}
+        </div>
         <div>
           <label className="label">Link da foto</label>
           <input type="url" value={form.image} onChange={set('image')} placeholder="https://..." className="input" />
@@ -574,13 +620,24 @@ function ProductsTab({ data, run }) {
                     <span className={p.available === 0 ? 'text-rose-600' : 'text-emerald-600'}>{p.available} livres</span>{' '}
                     <span className="text-slate-400 font-medium">({p.sold} vendidos de {p.totalStock})</span>
                   </p>
+                  {(p.dueDate || (p.installmentDates || []).length > 0) && (
+                    <p className="text-[11px] text-slate-500">
+                      {p.dueDate && <>Pagar até {formatDay(p.dueDate)}</>}
+                      {p.dueDate && p.installmentDates.length > 0 && ' • '}
+                      {p.installmentDates.length > 0 && <>Pix parcelado {p.installmentDates.length}x ({p.installmentDates.map(formatDayShort).join(', ')})</>}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex gap-1.5">
                 <button
                   onClick={() => {
                     setEditing(p.id);
-                    setForm({ ...p });
+                    setForm({
+                      ...p,
+                      parcelado: (p.installmentDates || []).length > 0,
+                      installmentDates: (p.installmentDates || []).length ? p.installmentDates : ['', '']
+                    });
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
                   className="p-2 rounded-xl bg-purple-50 text-purple-700 hover:bg-purple-100"
@@ -618,6 +675,7 @@ function BatchChargeTab({ data, run }) {
   const [batch, setBatch] = useState(batches[0] || '');
   const [description, setDescription] = useState('Frete internacional');
   const [amountPerUnit, setAmountPerUnit] = useState('');
+  const [dueDate, setDueDate] = useState('');
   const [confirming, setConfirming] = useState(false);
 
   const affected = data.orders.filter((o) => o.batch === batch && o.status !== 'Cancelado');
@@ -659,6 +717,10 @@ function BatchChargeTab({ data, run }) {
               <input required type="number" step="0.01" min="0.01" value={amountPerUnit} onChange={(e) => setAmountPerUnit(e.target.value)} className="input" />
             </div>
           </div>
+          <div>
+            <label className="label">Prazo para pagar (opcional)</label>
+            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />
+          </div>
           <div className="p-3 rounded-xl bg-purple-50 text-sm text-purple-900">
             {affected.length} pedido(s) • {units} unidade(s) • total a cobrar <strong>{formatBRL(total)}</strong>
           </div>
@@ -679,7 +741,7 @@ function BatchChargeTab({ data, run }) {
               className="btn-primary flex-1"
               onClick={async () => {
                 setConfirming(false);
-                const res = await run('addBatchCharge', { batch, description, amountPerUnit }, (r) => `${r.count} cobranças lançadas (${formatBRL(r.total)})`);
+                const res = await run('addBatchCharge', { batch, description, amountPerUnit, dueDate }, (r) => `${r.count} cobranças lançadas (${formatBRL(r.total)})`);
                 if (res) setAmountPerUnit('');
               }}
             >

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ChevronRight, Filter, Package, RefreshCw, Search, Sparkles } from 'lucide-react';
-import { CATEGORIES, MEMBERS, formatBRL, memberBadgeColor } from '../utils';
+import { CATEGORIES, MEMBERS, formatBRL, formatDay, memberBadgeColor, splitInstallments } from '../utils';
 import { ProductImage, Spinner } from './common';
 
 export default function Catalog({ products, config, loading, error, onRefresh, onClaim }) {
@@ -216,6 +216,12 @@ function ProductCard({ product: p, canClaim, onClaim }) {
         <div>
           <span className="block text-[11px] text-slate-400 font-medium">Valor do item (1ª fase)</span>
           <span className="text-xl font-black text-purple-900">{formatBRL(p.price)}</span>
+          {(p.installmentDates || []).length >= 2 && (
+            <span className="block text-[11px] font-bold text-fuchsia-700">
+              ou {p.installmentDates.length}x de {formatBRL(splitInstallments(p.price, p.installmentDates.length)[0])} no Pix
+            </span>
+          )}
+          {p.dueDate && <span className="block text-[11px] text-slate-500">Pagar até {formatDay(p.dueDate)}</span>}
         </div>
         <button
           disabled={soldOut || !canClaim}
