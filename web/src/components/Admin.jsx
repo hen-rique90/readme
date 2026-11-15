@@ -276,6 +276,11 @@ function OrdersTab({ data, run }) {
                     <td className="py-3 px-3">
                       <span className="font-semibold text-slate-800">{o.quantity}x {o.productName}</span>
                       <span className="block text-[11px] text-slate-400">#{o.productId} • {o.batch} • {o.shipping}{o.payment ? ` • ${o.payment}` : ''}</span>
+                      {o.buyerNote && (
+                        <span className="mt-1 inline-block px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-[11px] font-semibold text-amber-900">
+                          💬 {o.buyerNote}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-3 whitespace-nowrap">
                       <span className="block text-emerald-700 font-bold">{formatBRL(paid)}</span>
@@ -388,7 +393,7 @@ function OrderDetails({ order, charges, run }) {
             run('setOrderNote', { orderId: order.orderId, note }, 'Observação salva');
           }}
         >
-          <h4 className="font-extrabold text-slate-800 text-sm">Observação (a compradora vê)</h4>
+          <h4 className="font-extrabold text-slate-800 text-sm">Sua observação para a compradora (ela vê)</h4>
           <div className="flex gap-2">
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex: código de rastreio" className="input flex-1" />
             <button className="btn-soft">Salvar</button>
@@ -820,11 +825,11 @@ function exportCSV(data) {
   const brl = (n) => n.toFixed(2).replace('.', ',');
   downloadCSV(
     `CEG_pedidos_${new Date().toISOString().slice(0, 10)}.csv`,
-    ['Pedido', 'Data', 'Lote', 'Código', 'Produto', 'Membro', 'Qtd', 'Total item', 'Nome', '@', 'WhatsApp', 'Envio', 'Status', 'Pago', 'Falta pagar', 'Obs'],
+    ['Pedido', 'Data', 'Lote', 'Código', 'Produto', 'Membro', 'Qtd', 'Total item', 'Nome', '@', 'WhatsApp', 'Envio', 'Status', 'Pago', 'Falta pagar', 'Obs', 'Obs. da compradora'],
     data.orders.map((o) => {
       const ch = byOrder[o.orderId] || [];
       return [o.orderId, formatDate(o.createdAt), o.batch, o.productId, o.productName, o.member, o.quantity, brl(o.itemTotal),
-        o.buyerName, o.contact, o.whatsapp, o.shipping, o.status, brl(sumBy(ch, 'Pago')), brl(sumBy(ch, 'Pendente')), o.note];
+        o.buyerName, o.contact, o.whatsapp, o.shipping, o.status, brl(sumBy(ch, 'Pago')), brl(sumBy(ch, 'Pendente')), o.note, o.buyerNote || ''];
     })
   );
 }

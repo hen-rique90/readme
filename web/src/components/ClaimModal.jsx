@@ -12,7 +12,8 @@ export default function ClaimModal({ product, config, onClose, onClaimed, onView
     whatsapp: remembered.whatsapp || '',
     quantity: 1,
     shipping: remembered.shipping || config.shippingOptions?.[0] || 'Guardar na bag',
-    paymentPlan: 'avista'
+    paymentPlan: 'avista',
+    buyerNote: ''
   });
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
@@ -58,7 +59,9 @@ export default function ClaimModal({ product, config, onClose, onClaimed, onView
     const message =
       `Oii! 💜 Acabei de fazer um claim na CEG!\n\n` +
       `*Pedido:* ${order.orderId}\n*Item:* ${order.quantity}x ${order.productName} (#${order.productId})\n` +
-      `*Valor:* ${formatBRL(order.itemTotal)} (${order.payment || 'Pix à vista'})\n*Nome:* ${order.buyerName} (${order.contact})\n*Envio:* ${order.shipping}\n\n` +
+      `*Valor:* ${formatBRL(order.itemTotal)} (${order.payment || 'Pix à vista'})\n*Nome:* ${order.buyerName} (${order.contact})\n*Envio:* ${order.shipping}\n` +
+      (order.buyerNote ? `*Observação:* ${order.buyerNote}\n` : '') +
+      `\n` +
       (charges.length > 1 ? `*Parcelas:*\n${schedule}\n\n` : '') +
       `Segue meu comprovante do Pix de ${formatBRL(first.amount)}:`;
     return (
@@ -87,6 +90,7 @@ export default function ClaimModal({ product, config, onClose, onClaimed, onView
             <Row label="Item" value={`${order.quantity}x ${order.productName}`} />
             <Row label="Envio" value={order.shipping} />
             <Row label="Pagamento" value={order.payment || 'Pix à vista'} />
+            {order.buyerNote && <Row label="Observação" value={order.buyerNote} />}
             {charges.length > 1 ? (
               <div className="pt-1.5 border-t border-slate-200 space-y-1">
                 {charges.map((c, i) => (
@@ -213,6 +217,17 @@ export default function ClaimModal({ product, config, onClose, onClaimed, onView
               <option key={o}>{o}</option>
             ))}
           </select>
+        </div>
+        <div>
+          <label className="label">Observações (opcional)</label>
+          <textarea
+            value={form.buyerNote}
+            onChange={set('buyerNote')}
+            maxLength={300}
+            rows={2}
+            placeholder="Algum pedido especial? Ex: pode guardar junto com meu outro pedido"
+            className="input resize-none"
+          />
         </div>
         <p className="text-[11px] text-slate-500 leading-relaxed">
           Fretes (internacional e nacional) são cobrados depois, quando o lote chegar. Você acompanha tudo em "Meus Pedidos".

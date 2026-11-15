@@ -23,7 +23,7 @@ var SHEETS = {
 var HEADERS = {
   config: ['Chave', 'Valor', 'Descrição'],
   products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo', 'Prazo Pagamento', 'Datas Pix Parcelado'],
-  orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento'],
+  orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento', 'Obs. da compradora'],
   charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento']
 };
 
@@ -52,7 +52,7 @@ var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'no
 var ORDER_STATUSES = ['Reservado', 'Comprado', 'A caminho do Brasil', 'Chegou (na bag)', 'Enviado', 'Entregue', 'Cancelado'];
 var CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 var SHIPPING_OPTIONS = ['Guardar na bag', 'Enviar assim que chegar'];
-var SCHEMA_VERSION = '2';
+var SCHEMA_VERSION = '3';
 
 // ----------------------------------------------------------------------------
 // ENTRADAS HTTP
@@ -383,14 +383,15 @@ function toOrder_(r) {
     shipping: str_(v[12]),
     status: str_(v[13]) || 'Reservado',
     note: str_(v[14]),
-    payment: str_(v[15])
+    payment: str_(v[15]),
+    buyerNote: str_(v[16])
   };
 }
 
 function orderRow_(o) {
   return [o.orderId, dateCell_(o.createdAt), o.productId, o.productName,
     o.member, o.batch, o.buyerName, o.contact, o.whatsapp, o.quantity, o.unitPrice, o.itemTotal, o.shipping, o.status, o.note,
-    o.payment || ''];
+    o.payment || '', o.buyerNote || ''];
 }
 
 function toCharge_(r) {
@@ -470,6 +471,7 @@ function actionClaim_(params) {
 
   var buyerName = str_(params.buyerName).slice(0, 80);
   var contact = str_(params.contact).slice(0, 60);
+  var buyerNote = str_(params.buyerNote).replace(/\s+/g, ' ').slice(0, 300);
   var whatsapp = phone_(params.whatsapp);
   var quantity = Math.floor(num_(params.quantity));
   var shipping = SHIPPING_OPTIONS.indexOf(str_(params.shipping)) >= 0 ? str_(params.shipping) : SHIPPING_OPTIONS[0];
@@ -509,6 +511,7 @@ function actionClaim_(params) {
     shipping: shipping,
     status: 'Reservado',
     note: '',
+    buyerNote: buyerNote,
     payment: ''
   };
   var plan = paymentPlan_(product, order.itemTotal, wantsInstallments);

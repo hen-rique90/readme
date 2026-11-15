@@ -198,6 +198,7 @@ export default function MyOrders({ config }) {
                   {o.batch} • {o.shipping}{o.payment ? ` • ${o.payment}` : ''}
                   {o.note ? ` • Obs: ${o.note}` : ''}
                 </p>
+                {o.buyerNote && <p className="text-xs text-slate-500 mt-0.5">💬 Sua observação: {o.buyerNote}</p>}
               </div>
             </div>
             {o.charges.length > 0 && (

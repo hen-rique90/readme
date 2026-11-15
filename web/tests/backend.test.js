@@ -229,3 +229,21 @@ test('planilha antiga ganha as colunas novas sem perder dados', () => {
   assert.equal(gas.state.sheets['Cobranças'][0][8], 'Vencimento');
   assert.equal(api.call('claim', { ...buyer, productId: 'CEG-01', quantity: 1 }).ok, true);
 });
+
+test('observação da compradora no claim fica salva e separada da observação da ADM', () => {
+  const { api, admin, gas } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3 });
+  const res = api.call('claim', { ...buyer, productId: p.id, quantity: 1, buyerNote: '  Pode guardar\n junto com o outro pedido ' });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(res.order.buyerNote, 'Pode guardar junto com o outro pedido');
+  assert.equal(gas.state.sheets['Pedidos'][0][16], 'Obs. da compradora');
+  assert.equal(gas.state.sheets['Pedidos'][1][16], 'Pode guardar junto com o outro pedido');
+
+  admin('setOrderNote', { orderId: res.order.orderId, note: 'Rastreio BR123' });
+  admin('setOrderStatus', { orderId: res.order.orderId, status: 'Comprado' });
+  const mine = api.call('myOrders', { whatsapp: buyer.whatsapp, code: res.order.orderId });
+  assert.equal(mine.orders[0].buyerNote, 'Pode guardar junto com o outro pedido');
+  assert.equal(mine.orders[0].note, 'Rastreio BR123');
+  const long = api.call('claim', { ...buyer, productId: p.id, quantity: 1, buyerNote: 'x'.repeat(500) });
+  assert.equal(long.order.buyerNote.length, 300);
+});
