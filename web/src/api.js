@@ -7,9 +7,12 @@ export const IS_DEMO = !API_URL;
 export const DEMO_PASSWORD = 'army123';
 
 export class ApiError extends Error {
-  constructor(message, authError = false) {
+  constructor(message, data = {}) {
     super(message);
-    this.authError = authError;
+    this.authError = !!data.authError; // senha do ADM
+    this.loginRequired = !!data.loginRequired; // precisa entrar na conta para o claim
+    this.sessionExpired = !!data.sessionExpired; // token da compradora não vale mais
+    this.needsCode = !!data.needsCode; // criar conta pede o código de um pedido
   }
 }
 
@@ -77,6 +80,6 @@ export async function api(action, params = {}) {
       throw new ApiError('O servidor respondeu de um jeito inesperado. Confira a URL do Apps Script.');
     }
   }
-  if (!data || !data.ok) throw new ApiError((data && data.error) || 'Erro desconhecido.', !!(data && data.authError));
+  if (!data || !data.ok) throw new ApiError((data && data.error) || 'Erro desconhecido.', data || {});
   return data;
 }

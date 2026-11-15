@@ -14,6 +14,7 @@ function freshBackend() {
   api.call('catalog'); // cria as abas
   const config = gas.state.sheets['Config'];
   config.find((r) => r[0] === 'adminPassword')[1] = PASSWORD;
+  config.find((r) => r[0] === 'requireLogin')[1] = 'NÃO'; // testes antigos fazem claim sem conta
   const admin = (action, params = {}) => api.call(action, { ...params, password: PASSWORD });
   return { gas, api, admin };
 }
@@ -30,7 +31,7 @@ const buyer = { buyerName: 'Mariana Silva', contact: '@mari', whatsapp: '(11) 98
 
 test('cria as abas e a configuração inicial', () => {
   const { gas } = freshBackend();
-  assert.deepEqual(Object.keys(gas.state.sheets).sort(), ['Cobranças', 'Config', 'Pedidos', 'Produtos']);
+  assert.deepEqual(Object.keys(gas.state.sheets).sort(), ['Clientes', 'Cobranças', 'Config', 'Pedidos', 'Produtos']);
 });
 
 test('ADM bloqueado enquanto a senha padrão não for trocada', () => {
@@ -217,7 +218,7 @@ test('planilha antiga ganha as colunas novas sem perder dados', () => {
   const gas = createFakeGas();
   const api = loadBackend(CODE, gas);
   // simula a planilha criada pela versão anterior (sem as colunas novas)
-  gas.state.sheets['Config'] = [['Chave', 'Valor', 'Descrição'], ['adminPassword', PASSWORD, ''], ['claimsOpen', 'SIM', '']];
+  gas.state.sheets['Config'] = [['Chave', 'Valor', 'Descrição'], ['adminPassword', PASSWORD, ''], ['claimsOpen', 'SIM', ''], ['requireLogin', 'NÃO', '']];
   gas.state.sheets['Produtos'] = [['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo'],
     ['CEG-01', 'Antigo', 'V', 'Photocards', 50, 3, '', 'CEG #1', 'SIM']];
   gas.state.sheets['Pedidos'] = [['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação']];
@@ -228,4 +229,203 @@ test('planilha antiga ganha as colunas novas sem perder dados', () => {
   assert.equal(gas.state.sheets['Pedidos'][0][15], 'Pagamento');
   assert.equal(gas.state.sheets['Cobranças'][0][8], 'Vencimento');
   assert.equal(api.call('claim', { ...buyer, productId: 'CEG-01', quantity: 1 }).ok, true);
+});
+
+test('observação da compradora no claim fica salva e separada da observação da ADM', () => {
+  const { api, admin, gas } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3 });
+  const res = api.call('claim', { ...buyer, productId: p.id, quantity: 1, buyerNote: '  Pode guardar\n junto com o outro pedido ' });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(res.order.buyerNote, 'Pode guardar junto com o outro pedido');
+  assert.equal(gas.state.sheets['Pedidos'][0][16], 'Obs. da compradora');
+  assert.equal(gas.state.sheets['Pedidos'][1][16], 'Pode guardar junto com o outro pedido');
+
+  admin('setOrderNote', { orderId: res.order.orderId, note: 'Rastreio BR123' });
+  admin('setOrderStatus', { orderId: res.order.orderId, status: 'Comprado' });
+  const mine = api.call('myOrders', { whatsapp: buyer.whatsapp, code: res.order.orderId });
+  assert.equal(mine.orders[0].buyerNote, 'Pode guardar junto com o outro pedido');
+  assert.equal(mine.orders[0].note, 'Rastreio BR123');
+  const long = api.call('claim', { ...buyer, productId: p.id, quantity: 1, buyerNote: 'x'.repeat(500) });
+  assert.equal(long.order.buyerNote.length, 300);
+});
+
+// ---------------------------------------------------------------- contas
+const account = { name: 'Mariana Silva', contact: '@mari', whatsapp: '(11) 98888-7777', password: 'segredo1' };
+
+function requireLogin(gas) {
+  gas.state.sheets['Config'].find((r) => r[0] === 'requireLogin')[1] = 'SIM';
+}
+
+test('conta: criar, entrar e comprar com um toque (sem digitar dados)', () => {
+  const { api, admin, gas } = freshBackend();
+  requireLogin(gas);
+  const p = addProduct(admin, { totalStock: 2 });
+
+  const guest = api.call('claim', { ...buyer, productId: p.id, quantity: 1 });
+  assert.equal(guest.ok, false);
+  assert.equal(guest.loginRequired, true);
+
+  const reg = api.call('register', account);
+  assert.equal(reg.ok, true, reg.error);
+  assert.equal(reg.profile.whatsapp, '11988887777');
+  const row = gas.state.sheets['Clientes'][1];
+  assert.equal(row.includes('segredo1'), false, 'senha não pode ficar visível na planilha');
+
+  const claim = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+  assert.equal(claim.ok, true, claim.error);
+  assert.equal(claim.order.buyerName, 'Mariana Silva');
+  assert.equal(claim.order.whatsapp, '11988887777');
+
+  const mine = api.call('myOrders', { token: reg.token });
+  assert.equal(mine.orders.length, 1);
+
+  assert.equal(api.call('login', { whatsapp: '11988887777', password: 'errada' }).ok, false);
+  const login = api.call('login', { whatsapp: '+55 11 98888-7777', password: 'segredo1' });
+  assert.equal(login.ok, true, login.error);
+  assert.equal(api.call('me', { token: login.token }).profile.name, 'Mariana Silva');
+});
+
+test('conta: quem já comprou precisa do código de um pedido para criar a conta', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3 });
+  const old = api.call('claim', { ...buyer, productId: p.id, quantity: 1 }).order;
+  const other = api.call('claim', { ...buyer, whatsapp: '21977776666', productId: p.id, quantity: 1 }).order;
+
+  const noCode = api.call('register', account);
+  assert.equal(noCode.ok, false);
+  assert.equal(noCode.needsCode, true);
+  assert.equal(api.call('register', { ...account, code: other.orderId }).ok, false);
+  const ok = api.call('register', { ...account, code: old.orderId.replace('PED-', '').toLowerCase() });
+  assert.equal(ok.ok, true, ok.error);
+  assert.equal(api.call('myOrders', { token: ok.token }).orders.length, 1, 'histórico antigo aparece na conta');
+  assert.equal(api.call('register', { ...account, code: old.orderId }).ok, false, 'não cria conta duplicada');
+});
+
+test('conta: token falso, adulterado ou de senha antiga não funciona', () => {
+  const { api } = freshBackend();
+  const reg = api.call('register', account);
+  const [wa, exp, sig] = reg.token.split('.');
+  assert.equal(api.call('me', { token: `21977776666.${exp}.${sig}` }).ok, false);
+  assert.equal(api.call('me', { token: `${wa}.${(Date.now() + 9e12).toString(36)}.${sig}` }).ok, false);
+  assert.equal(api.call('me', { token: 'qualquer.coisa.aqui' }).sessionExpired, true);
+
+  const changed = api.call('changePassword', { token: reg.token, currentPassword: 'segredo1', newPassword: 'nova-senha' });
+  assert.equal(changed.ok, true, changed.error);
+  assert.equal(api.call('me', { token: reg.token }).ok, false, 'trocar a senha encerra as sessões antigas');
+  assert.equal(api.call('me', { token: changed.token }).ok, true);
+  assert.equal(api.call('changePassword', { token: changed.token, currentPassword: 'x', newPassword: 'outra123' }).ok, false);
+});
+
+test('conta: ADM gera senha temporária e ela é obrigada a trocar', () => {
+  const { api, admin } = freshBackend();
+  api.call('register', account);
+  const reset = admin('adminResetPassword', { whatsapp: '11988887777' });
+  assert.equal(reset.ok, true, reset.error);
+  assert.equal(api.call('login', { whatsapp: '11988887777', password: 'segredo1' }).ok, false);
+  const login = api.call('login', { whatsapp: '11988887777', password: reset.tempPassword });
+  assert.equal(login.profile.mustChange, true);
+  const changed = api.call('changePassword', { token: login.token, newPassword: 'minha-nova' });
+  assert.equal(changed.ok, true, changed.error);
+  assert.equal(changed.profile.mustChange, false);
+  const data = admin('adminData');
+  assert.equal(data.clients.length, 1);
+  assert.equal(JSON.stringify(data.clients).includes('hash'), false);
+});
+
+test('conta: muitas senhas erradas bloqueiam por 15 minutos', () => {
+  const { api } = freshBackend();
+  api.call('register', account);
+  for (let i = 0; i < 8; i++) api.call('login', { whatsapp: '11988887777', password: 'errada' });
+  const blocked = api.call('login', { whatsapp: '11988887777', password: 'segredo1' });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /tentativas/);
+});
+
+test('conta: compradora ajusta observação e desfaz claim feito sem querer', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 1 });
+  const reg = api.call('register', account);
+  const other = api.call('register', { ...account, whatsapp: '21977776666' });
+  const { order } = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+
+  assert.equal(api.call('updateMyOrder', { token: other.token, orderId: order.orderId, buyerNote: 'x' }).ok, false, 'não mexe no pedido de outra');
+  const upd = api.call('updateMyOrder', { token: reg.token, orderId: order.orderId, buyerNote: 'Guardar junto' });
+  assert.equal(upd.order.buyerNote, 'Guardar junto');
+
+  assert.equal(api.call('cancelMyOrder', { token: reg.token, orderId: order.orderId }).ok, true);
+  assert.equal(api.call('catalog').products[0].available, 1, 'item volta para o estoque');
+  assert.equal(api.call('myOrders', { token: reg.token }).totals.owed, 0);
+});
+
+test('conta: não dá para desfazer depois de pago', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 1 });
+  const reg = api.call('register', account);
+  const { order, charge } = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+  admin('setChargeStatus', { chargeId: charge.chargeId, status: 'Pago' });
+  assert.equal(api.call('cancelMyOrder', { token: reg.token, orderId: order.orderId }).ok, false);
+});
+
+test('anunciar por membro: um item por integrante, com estoque e foto próprios', () => {
+  const { api, admin } = freshBackend();
+  addProduct(admin); // CEG-01 já existe
+  const res = admin('saveProductBatch', {
+    product: { name: 'Photocard Golden POB', category: 'Photocards', price: 30, batch: 'CEG #50', image: 'https://x/geral.jpg', dueDate: '2026-12-15' },
+    variants: [
+      { member: 'Jimin', image: 'https://x/jimin.jpg' },
+      { member: 'V', totalStock: 2 },
+      { member: 'Jungkook' }
+    ]
+  });
+  assert.equal(res.ok, true, res.error);
+  assert.deepEqual(res.products.map((p) => p.id), ['CEG-02', 'CEG-03', 'CEG-04']);
+  const cat = api.call('catalog').products.filter((p) => p.batch === 'CEG #50');
+  assert.deepEqual(cat.map((p) => [p.name, p.member, p.totalStock, p.image, p.dueDate]), [
+    ['Photocard Golden POB — Jimin', 'Jimin', 1, 'https://x/jimin.jpg', '2026-12-15'],
+    ['Photocard Golden POB — V', 'V', 2, 'https://x/geral.jpg', '2026-12-15'],
+    ['Photocard Golden POB — Jungkook', 'Jungkook', 1, 'https://x/geral.jpg', '2026-12-15']
+  ]);
+  // um claim no item de 1 unidade esgota só aquele membro
+  assert.equal(api.call('claim', { ...buyer, productId: 'CEG-02', quantity: 1 }).ok, true);
+  assert.equal(api.call('claim', { ...buyer, productId: 'CEG-02', quantity: 1 }).ok, false);
+  assert.equal(api.call('claim', { ...buyer, productId: 'CEG-03', quantity: 1 }).ok, true);
+});
+
+test('anunciar por membro: dado inválido não cria nada pela metade', () => {
+  const { api, admin } = freshBackend();
+  const bad = admin('saveProductBatch', {
+    product: { name: 'Set', price: 30 },
+    variants: [{ member: 'RM' }, { member: 'Jin', totalStock: 0 }]
+  });
+  assert.equal(bad.ok, false);
+  assert.equal(admin('saveProductBatch', { product: { name: 'Set', price: 30 }, variants: [{ member: 'RM' }, { member: 'RM' }] }).ok, false);
+  assert.equal(admin('saveProductBatch', { product: { name: '', price: 30 }, variants: [{ member: 'RM' }] }).ok, false);
+  assert.equal(api.call('catalog').products.length, 0);
+});
+
+test('produto informa frete (incluso ou não) e condição (novo, lacrado, aberto)', () => {
+  const { api, admin, gas } = freshBackend();
+  addProduct(admin, { name: 'Álbum', shippingCost: 'Frete incluso', condition: 'Lacrado' });
+  addProduct(admin, { name: 'Sem info' });
+  const [a, b] = api.call('catalog').products;
+  assert.equal(a.shippingCost, 'Frete incluso');
+  assert.equal(a.condition, 'Lacrado');
+  assert.equal(b.shippingCost, '');
+  assert.equal(b.condition, '');
+  assert.deepEqual(gas.state.sheets['Produtos'][0].slice(11), ['Frete', 'Condição']);
+  assert.deepEqual(gas.state.sheets['Produtos'][1].slice(11), ['Frete incluso', 'Lacrado']);
+
+  // digitado na planilha sem acento/maiúscula também vale
+  gas.state.sheets['Produtos'][2][11] = 'frete nao incluso';
+  gas.state.sheets['Produtos'][2][12] = 'ABERTO';
+  const fixed = api.call('catalog').products[1];
+  assert.equal(fixed.shippingCost, 'Frete não incluso');
+  assert.equal(fixed.condition, 'Aberto');
+
+  assert.equal(admin('saveProduct', { product: { isNew: true, name: 'X', price: 1, totalStock: 1, condition: 'Usado' } }).ok, false);
+  const batch = admin('saveProductBatch', {
+    product: { name: 'PC', price: 10, shippingCost: 'Frete não incluso', condition: 'Novo' },
+    variants: [{ member: 'RM' }, { member: 'Jin' }]
+  });
+  assert.deepEqual(batch.products.map((p) => [p.shippingCost, p.condition]), [['Frete não incluso', 'Novo'], ['Frete não incluso', 'Novo']]);
 });

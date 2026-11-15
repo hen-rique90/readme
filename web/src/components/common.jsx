@@ -159,3 +159,20 @@ export function DateListInput({ value, onChange }) {
     </div>
   );
 }
+
+// Selinhos de condição e frete do produto
+export function ProductTags({ product, className = '' }) {
+  if (!product.condition && !product.shippingCost) return null;
+  const conditionColor = {
+    Lacrado: 'bg-sky-50 text-sky-800 border-sky-200',
+    Novo: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    Aberto: 'bg-orange-50 text-orange-800 border-orange-200'
+  }[product.condition];
+  return (
+    <span className={`flex flex-wrap gap-1 ${className}`}>
+      {product.condition && <Badge className={conditionColor}>{product.condition}</Badge>}
+      {product.shippingCost === 'Frete incluso' && <Badge className="bg-emerald-50 text-emerald-800 border-emerald-200">🚚 Frete incluso</Badge>}
+      {product.shippingCost === 'Frete não incluso' && <Badge className="bg-slate-50 text-slate-600 border-slate-200">Frete à parte</Badge>}
+    </span>
+  );
+}

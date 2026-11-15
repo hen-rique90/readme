@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ChevronDown, ChevronUp, Download, Edit3, Eye, EyeOff, Lock, LogOut, Package, Phone, Plus,
+  ChevronDown, ChevronUp, Download, Edit3, Eye, EyeOff, KeyRound, Lock, LogOut, Package, Phone, Plus,
   ReceiptText, RefreshCw, Settings, Trash2, Truck, Users
 } from 'lucide-react';
 import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
@@ -8,7 +8,7 @@ import {
   CATEGORIES, MEMBERS, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone,
   formatDay, formatDayShort, isAlbumLink, isOverdue, memberBadgeColor, orderStatusColor, splitInstallments, waLink
 } from '../utils';
-import { Badge, DateListInput, DueBadge, Modal, ProductImage, Spinner } from './common';
+import { Badge, DateListInput, DueBadge, Modal, ProductImage, ProductTags, Spinner } from './common';
 
 const PASS_KEY = 'ceg_adm_senha';
 const CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
@@ -117,7 +117,7 @@ export default function Admin({ showToast, onCatalogChange }) {
       </div>
 
       {tab === 'orders' && <OrdersTab data={data} run={run} />}
-      {tab === 'buyers' && <BuyersTab data={data} />}
+      {tab === 'buyers' && <BuyersTab data={data} run={run} />}
       {tab === 'products' && <ProductsTab data={data} run={run} />}
       {tab === 'batch' && <BatchChargeTab data={data} run={run} />}
       {tab === 'settings' && <SettingsTab data={data} run={run} />}
@@ -276,6 +276,11 @@ function OrdersTab({ data, run }) {
                     <td className="py-3 px-3">
                       <span className="font-semibold text-slate-800">{o.quantity}x {o.productName}</span>
                       <span className="block text-[11px] text-slate-400">#{o.productId} • {o.batch} • {o.shipping}{o.payment ? ` • ${o.payment}` : ''}</span>
+                      {o.buyerNote && (
+                        <span className="mt-1 inline-block px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-[11px] font-semibold text-amber-900">
+                          💬 {o.buyerNote}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-3 whitespace-nowrap">
                       <span className="block text-emerald-700 font-bold">{formatBRL(paid)}</span>
@@ -388,7 +393,7 @@ function OrderDetails({ order, charges, run }) {
             run('setOrderNote', { orderId: order.orderId, note }, 'Observação salva');
           }}
         >
-          <h4 className="font-extrabold text-slate-800 text-sm">Observação (a compradora vê)</h4>
+          <h4 className="font-extrabold text-slate-800 text-sm">Sua observação para a compradora (ela vê)</h4>
           <div className="flex gap-2">
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex: código de rastreio" className="input flex-1" />
             <button className="btn-soft">Salvar</button>
@@ -401,8 +406,14 @@ function OrderDetails({ order, charges, run }) {
 
 // ---------------------------------------------------------------------------
 
-function BuyersTab({ data }) {
+function BuyersTab({ data, run }) {
   const [onlyOwing, setOnlyOwing] = useState(true);
+  const [temp, setTemp] = useState(null);
+  const accounts = useMemo(() => {
+    const map = {};
+    (data.clients || []).forEach((c) => { map[c.whatsapp] = c; });
+    return map;
+  }, [data.clients]);
   const [query, setQuery] = useState('');
   const chargesByOrder = useChargesByOrder(data.charges);
 
@@ -418,8 +429,11 @@ function BuyersTab({ data }) {
         } else if (c.status === 'Pago') b.paid += c.amount;
       });
     });
+    (data.clients || []).forEach((c) => {
+      if (!map[c.whatsapp]) map[c.whatsapp] = { whatsapp: c.whatsapp, name: c.name, contact: c.contact, items: 0, owed: 0, paid: 0, pending: [] };
+    });
     return Object.values(map).sort((a, b) => b.owed - a.owed || a.name.localeCompare(b.name));
-  }, [data.orders, chargesByOrder]);
+  }, [data.orders, data.clients, chargesByOrder]);
 
   const q = query.toLowerCase().trim();
   const list = buyers.filter((b) => (!onlyOwing || b.owed > 0) && (!q || `${b.name} ${b.contact} ${b.whatsapp}`.toLowerCase().includes(q)));
@@ -427,7 +441,16 @@ function BuyersTab({ data }) {
   const reminder = (b) =>
     `Oii ${b.name.split(' ')[0]}! 💜 Passando para lembrar dos pagamentos pendentes da CEG:\n\n` +
     b.pending.map((c) => `• ${c.order.orderId} — ${c.order.quantity}x ${c.order.productName}: ${c.description} (${formatBRL(c.amount)})${c.dueDate ? ` — até ${formatDay(c.dueDate)}${isOverdue(c) ? ' ⚠️ vencida' : ''}` : ''}`).join('\n') +
-    `\n\n*Total: ${formatBRL(b.owed)}*\nChave Pix: ${data.config.pixKey}\n\nVocê acompanha tudo em "Meus Pedidos" no site com seu WhatsApp + código ${b.pending[0]?.order.orderId || ''}.`;
+    `\n\n*Total: ${formatBRL(b.owed)}*\nChave Pix: ${data.config.pixKey}\n\n` +
+    (accounts[b.whatsapp]
+      ? `Você acompanha tudo em "Meus Pedidos" entrando na sua conta no site.`
+      : `Crie sua conta no site (botão "Entrar" → "Criar conta") com este WhatsApp e o código ${b.pending[0]?.order.orderId || ''} para acompanhar tudo em "Meus Pedidos".`);
+
+  const resetPassword = async (b) => {
+    if (!window.confirm(`Gerar uma senha temporária para ${b.name}? A senha atual dela deixa de funcionar.`)) return;
+    const res = await run('adminResetPassword', { whatsapp: b.whatsapp }, 'Senha temporária gerada');
+    if (res) setTemp(res);
+  };
 
   return (
     <div className="card overflow-hidden">
@@ -440,11 +463,33 @@ function BuyersTab({ data }) {
       </div>
       <div className="divide-y divide-purple-50">
         {list.length === 0 && <p className="p-8 text-center text-slate-400 text-sm">Ninguém por aqui. 🎉</p>}
+        {temp && (
+          <Modal onClose={() => setTemp(null)}>
+            <div className="space-y-3 text-center">
+              <h3 className="text-lg font-extrabold text-slate-800 pr-8">Senha temporária de {temp.name}</h3>
+              <p className="text-3xl font-black font-mono text-purple-900 tracking-wider">{temp.tempPassword}</p>
+              <p className="text-xs text-slate-500">Ela entra com essa senha e o site pede para criar uma nova na hora. Esta tela não mostra a senha de novo.</p>
+              <a
+                href={waLink(temp.whatsapp, `Oii ${temp.name.split(' ')[0]}! 💜 Sua senha temporária da CEG é: ${temp.tempPassword}\nEntre no site com seu WhatsApp e essa senha — ele vai pedir para você criar uma senha nova.`)}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2"
+              >
+                <Phone className="w-4 h-4" /> Enviar pelo WhatsApp
+              </a>
+            </div>
+          </Modal>
+        )}
         {list.map((b) => (
           <div key={b.whatsapp} className="p-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <span className="font-bold text-slate-800">{b.name}</span>{' '}
-              <span className="text-xs text-purple-600 font-semibold">{b.contact}</span>
+              <span className="text-xs text-purple-600 font-semibold">{b.contact}</span>{' '}
+              {accounts[b.whatsapp] ? (
+                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">✓ tem conta</Badge>
+              ) : (
+                <Badge className="bg-slate-50 text-slate-500 border-slate-200">sem conta</Badge>
+              )}
               <span className="block text-xs text-slate-400">{formatPhone(b.whatsapp)} • {b.items} item(ns)</span>
             </div>
             <div className="flex items-center gap-4">
@@ -452,6 +497,11 @@ function BuyersTab({ data }) {
                 <span className="block text-emerald-700 font-bold">Pago {formatBRL(b.paid)}</span>
                 <span className={`font-black text-sm ${b.owed > 0 ? 'text-amber-600' : 'text-slate-400'}`}>Deve {formatBRL(b.owed)}</span>
               </div>
+              {accounts[b.whatsapp] && (
+                <button onClick={() => resetPassword(b)} className="btn-soft" title="Para quem esqueceu a senha">
+                  <KeyRound className="w-3.5 h-3.5" /> Senha temporária
+                </button>
+              )}
               {b.owed > 0 && (
                 <a href={waLink(b.whatsapp, reminder(b))} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold">
                   <Phone className="w-3.5 h-3.5" /> Cobrar
@@ -467,9 +517,11 @@ function BuyersTab({ data }) {
 
 // ---------------------------------------------------------------------------
 
+const BY_MEMBER = MEMBERS.filter((m) => m !== 'OT7');
+
 const EMPTY_PRODUCT = {
   id: '', name: '', member: 'OT7', category: 'Photocards', price: '', totalStock: 1, image: '', batch: '', active: true,
-  dueDate: '', parcelado: false, installmentDates: ['', '']
+  dueDate: '', parcelado: false, installmentDates: ['', ''], shippingCost: '', condition: ''
 };
 
 function ProductsTab({ data, run }) {
@@ -477,10 +529,15 @@ function ProductsTab({ data, run }) {
   const [form, setForm] = useState({ ...EMPTY_PRODUCT, batch: lastBatch });
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [byMember, setByMember] = useState(false);
+  const [variants, setVariants] = useState({}); // { Jimin: { on, totalStock, image } }
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+  const chosen = BY_MEMBER.filter((m) => variants[m]?.on);
+  const setVariant = (m, patch) => setVariants({ ...variants, [m]: { totalStock: 1, image: '', ...variants[m], ...patch } });
 
   const reset = () => {
     setEditing(null);
+    setVariants({});
     setForm({ ...EMPTY_PRODUCT, batch: form.batch, dueDate: form.dueDate });
   };
 
@@ -497,6 +554,21 @@ function ProductsTab({ data, run }) {
       window.alert('Para o Pix parcelado, preencha pelo menos 2 datas.');
       return;
     }
+    if (byMember && !editing) {
+      if (!chosen.length) {
+        setSaving(false);
+        window.alert('Escolha pelo menos um membro.');
+        return;
+      }
+      const res = await run(
+        'saveProductBatch',
+        { product, variants: chosen.map((m) => ({ member: m, totalStock: variants[m].totalStock, image: variants[m].image })) },
+        (r) => `${r.products.length} itens adicionados (${r.products[0].id} a ${r.products[r.products.length - 1].id})!`
+      );
+      setSaving(false);
+      if (res) reset();
+      return;
+    }
     const res = await run('saveProduct', { product }, (r) => (editing ? 'Produto atualizado!' : `Item ${r.product.id} adicionado à CEG!`));
     setSaving(false);
     if (res) reset();
@@ -508,11 +580,32 @@ function ProductsTab({ data, run }) {
         <h3 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
           <Plus className="w-5 h-5 text-purple-600" /> {editing ? `Editando ${editing}` : 'Anunciar item'}
         </h3>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Código (opcional)</label>
-            <input value={form.id} disabled={!!editing} onChange={set('id')} placeholder="Automático" className="input disabled:bg-slate-50" />
+        {!editing && (
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-purple-50">
+            {[[false, 'Um item'], [true, 'Por membro']].map(([value, label]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setByMember(value)}
+                className={`py-2 rounded-lg text-sm font-bold ${byMember === value ? 'bg-white text-purple-800 shadow-sm' : 'text-purple-700'}`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          {byMember && !editing ? (
+            <div>
+              <label className="label">Código</label>
+              <div className="input bg-slate-50 text-slate-400">Automático</div>
+            </div>
+          ) : (
+            <div>
+              <label className="label">Código (opcional)</label>
+              <input value={form.id} disabled={!!editing} onChange={set('id')} placeholder="Automático" className="input disabled:bg-slate-50" />
+            </div>
+          )}
           <div>
             <label className="label">Lote / CEG</label>
             <input value={form.batch} onChange={set('batch')} placeholder="CEG #44 Weverse" className="input" list="batches" />
@@ -526,13 +619,15 @@ function ProductsTab({ data, run }) {
           <input required value={form.name} onChange={set('name')} placeholder="Photocard Jungkook Golden POB" className="input" />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Membro</label>
-            <select value={form.member} onChange={set('member')} className="input">
-              {[...new Set([...MEMBERS, form.member])].map((m) => <option key={m}>{m}</option>)}
-            </select>
-          </div>
-          <div>
+          {!(byMember && !editing) && (
+            <div>
+              <label className="label">Membro</label>
+              <select value={form.member} onChange={set('member')} className="input">
+                {[...new Set([...MEMBERS, form.member])].map((m) => <option key={m}>{m}</option>)}
+              </select>
+            </div>
+          )}
+          <div className={byMember && !editing ? 'col-span-2' : ''}>
             <label className="label">Categoria</label>
             <select value={form.category} onChange={set('category')} className="input">
               {[...new Set([...CATEGORIES, form.category])].map((c) => <option key={c}>{c}</option>)}
@@ -544,11 +639,84 @@ function ProductsTab({ data, run }) {
             <label className="label">Preço (R$) *</label>
             <input required type="number" step="0.01" min="0.01" value={form.price} onChange={set('price')} placeholder="95.00" className="input" />
           </div>
+          {!(byMember && !editing) && (
+            <div>
+              <label className="label">Quantidade total *</label>
+              <input required type="number" min="1" value={form.totalStock} onChange={set('totalStock')} className="input" />
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="label">Quantidade total *</label>
-            <input required type="number" min="1" value={form.totalStock} onChange={set('totalStock')} className="input" />
+            <label className="label">Condição</label>
+            <select value={form.condition || ''} onChange={set('condition')} className="input">
+              <option value="">Não informar</option>
+              {(data.config.conditionOptions || ['Novo', 'Lacrado', 'Aberto']).map((c) => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Frete</label>
+            <select value={form.shippingCost || ''} onChange={set('shippingCost')} className="input">
+              <option value="">Não informar</option>
+              {(data.config.shippingCostOptions || ['Frete incluso', 'Frete não incluso']).map((c) => <option key={c}>{c}</option>)}
+            </select>
           </div>
         </div>
+        {byMember && !editing && (
+          <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50/40 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="label mb-0">Membros ({chosen.length})</span>
+              <button
+                type="button"
+                className="text-xs font-bold text-fuchsia-700 underline"
+                onClick={() => {
+                  const all = chosen.length < BY_MEMBER.length;
+                  const next = {};
+                  BY_MEMBER.forEach((m) => { next[m] = { totalStock: 1, image: '', ...variants[m], on: all }; });
+                  setVariants(next);
+                }}
+              >
+                {chosen.length < BY_MEMBER.length ? 'Marcar todos' : 'Desmarcar todos'}
+              </button>
+            </div>
+            {BY_MEMBER.map((m) => {
+              const v = variants[m] || {};
+              return (
+                <div key={m} className={`rounded-xl p-2 ${v.on ? 'bg-white border border-fuchsia-200' : ''}`}>
+                  <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer min-w-0">
+                    <input type="checkbox" checked={!!v.on} onChange={(e) => setVariant(m, { on: e.target.checked })} className="w-4 h-4 accent-fuchsia-600 shrink-0" />
+                    <span className="shrink-0">{m}</span>
+                    {v.on && form.name && <span className="text-[11px] font-medium text-slate-400 truncate">→ {form.name} — {m}</span>}
+                  </label>
+                  {v.on && (
+                    <div className="grid grid-cols-[4.5rem_1fr] gap-2 mt-2">
+                      <input
+                        type="number"
+                        min="1"
+                        value={v.totalStock ?? 1}
+                        onChange={(e) => setVariant(m, { totalStock: e.target.value })}
+                        className="input py-1.5"
+                        aria-label={`Quantidade de ${m}`}
+                        title="Quantidade"
+                      />
+                      <input
+                        type="url"
+                        value={v.image || ''}
+                        onChange={(e) => setVariant(m, { image: e.target.value })}
+                        placeholder="Foto deste membro (opcional)"
+                        className="input py-1.5"
+                        aria-label={`Foto de ${m}`}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <p className="text-[11px] text-slate-500">
+              Cada membro vira um item separado (quantidade 1 por padrão). Sem foto própria, usa a foto geral abaixo.
+            </p>
+          </div>
+        )}
         <div className="rounded-2xl border border-purple-100 bg-purple-50/40 p-3 space-y-3">
           <div>
             <label className="label">Prazo para pagamento (Pix à vista)</label>
@@ -576,7 +744,7 @@ function ProductsTab({ data, run }) {
           )}
         </div>
         <div>
-          <label className="label">Link da foto</label>
+          <label className="label">{byMember && !editing ? 'Foto geral (opcional)' : 'Link da foto'}</label>
           <input type="url" value={form.image} onChange={set('image')} placeholder="https://..." className="input" />
           {form.image && (
             <div className="mt-2 flex items-center gap-3">
@@ -594,7 +762,8 @@ function ProductsTab({ data, run }) {
         </div>
         <div className="flex gap-2 pt-1">
           <button className="btn-primary flex-1 py-3" disabled={saving}>
-            {saving && <Spinner className="w-4 h-4" />} {editing ? 'Salvar alterações' : 'Publicar na CEG'}
+            {saving && <Spinner className="w-4 h-4" />}{' '}
+            {editing ? 'Salvar alterações' : byMember ? `Publicar ${chosen.length} itens na CEG` : 'Publicar na CEG'}
           </button>
           {editing && <button type="button" onClick={reset} className="btn-soft px-4">Cancelar</button>}
         </div>
@@ -615,6 +784,7 @@ function ProductsTab({ data, run }) {
                     {!p.active && <Badge className="bg-slate-200 text-slate-600 border-slate-300">Oculto</Badge>}
                   </div>
                   <h4 className="font-bold text-slate-800 text-sm">{p.name}</h4>
+                  <ProductTags product={p} className="my-0.5" />
                   <p className="text-xs font-bold text-purple-900">
                     {formatBRL(p.price)} •{' '}
                     <span className={p.available === 0 ? 'text-rose-600' : 'text-emerald-600'}>{p.available} livres</span>{' '}
@@ -773,6 +943,13 @@ function SettingsTab({ data, run }) {
         <input type="checkbox" checked={!!form.claimsOpen} onChange={(e) => setForm({ ...form, claimsOpen: e.target.checked })} className="w-5 h-5 accent-purple-600" />
         <span className="text-sm font-bold text-purple-900">Claims abertos (desmarque para pausar as vendas)</span>
       </label>
+      <label className="flex items-center gap-3 p-3 rounded-xl bg-purple-50 cursor-pointer">
+        <input type="checkbox" checked={!!form.requireLogin} onChange={(e) => setForm({ ...form, requireLogin: e.target.checked })} className="w-5 h-5 accent-purple-600" />
+        <span className="text-sm font-bold text-purple-900">
+          Exigir conta para fazer claim
+          <span className="block text-[11px] font-medium text-purple-700">Desmarcado: quem não tem conta também pode dar claim preenchendo nome, @ e WhatsApp.</span>
+        </span>
+      </label>
       <div>
         <label className="label">Nome da loja</label>
         <input value={form.storeName} onChange={set('storeName')} className="input" />
@@ -820,11 +997,11 @@ function exportCSV(data) {
   const brl = (n) => n.toFixed(2).replace('.', ',');
   downloadCSV(
     `CEG_pedidos_${new Date().toISOString().slice(0, 10)}.csv`,
-    ['Pedido', 'Data', 'Lote', 'Código', 'Produto', 'Membro', 'Qtd', 'Total item', 'Nome', '@', 'WhatsApp', 'Envio', 'Status', 'Pago', 'Falta pagar', 'Obs'],
+    ['Pedido', 'Data', 'Lote', 'Código', 'Produto', 'Membro', 'Qtd', 'Total item', 'Nome', '@', 'WhatsApp', 'Envio', 'Status', 'Pago', 'Falta pagar', 'Obs', 'Obs. da compradora'],
     data.orders.map((o) => {
       const ch = byOrder[o.orderId] || [];
       return [o.orderId, formatDate(o.createdAt), o.batch, o.productId, o.productName, o.member, o.quantity, brl(o.itemTotal),
-        o.buyerName, o.contact, o.whatsapp, o.shipping, o.status, brl(sumBy(ch, 'Pago')), brl(sumBy(ch, 'Pendente')), o.note];
+        o.buyerName, o.contact, o.whatsapp, o.shipping, o.status, brl(sumBy(ch, 'Pago')), brl(sumBy(ch, 'Pendente')), o.note, o.buyerNote || ''];
     })
   );
 }

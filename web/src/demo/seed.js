@@ -21,6 +21,7 @@ export function seedDemo(backend, gas, password) {
     if (row) row[1] = value;
   };
   set('adminPassword', password);
+  set('requireLogin', 'NÃO'); // os claims de exemplo abaixo são feitos sem conta
   set('pixKey', 'ceg.cantinhodaarmy@gmail.com');
   set('noticeBanner', '💜 CEG #42 & #43 ABERTAS! Fez o claim, o item já é seu. (Modo demonstração)');
 
@@ -34,7 +35,11 @@ export function seedDemo(backend, gas, password) {
   PRODUCTS.forEach(([name, member, category, price, totalStock, image, batch]) => {
     const installmentDates = price >= 300 ? [day(15), day(45), day(75)] : [];
     admin('saveProduct', {
-      product: { isNew: true, name, member, category, price, totalStock, image, batch, dueDate: day(15), installmentDates }
+      product: {
+        isNew: true, name, member, category, price, totalStock, image, batch, dueDate: day(15), installmentDates,
+        condition: category === 'Álbuns' || category === 'Vinil' ? 'Lacrado' : 'Novo',
+        shippingCost: price >= 300 ? 'Frete incluso' : 'Frete não incluso'
+      }
     });
   });
 
@@ -50,6 +55,14 @@ export function seedDemo(backend, gas, password) {
   if (mari.ok) admin('setOrderStatus', { orderId: mari.order.orderId, status: 'Comprado' });
   if (bia.ok) admin('setChargeStatus', { chargeId: bia.charge.chargeId, status: 'Pago' });
   admin('addBatchCharge', { batch: 'CEG #42 - Coreia', description: 'Frete internacional', amountPerUnit: 18 });
+
+  // Conta de exemplo: Mariana (WhatsApp 11988887777, senha 123456)
+  if (mari.ok) {
+    backend.call('register', {
+      name: 'Mariana Silva', contact: '@mari_jk97', whatsapp: '11988887777', password: '123456', code: mari.order.orderId
+    });
+  }
+  set('requireLogin', 'SIM');
 
   // Guarda um acesso de exemplo para "Meus Pedidos"
   if (mari.ok) {
