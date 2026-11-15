@@ -715,3 +715,43 @@ test('corrigir item: quantidade e valor recalculam o total e ajustam a cobrança
   const r3 = admin('adminUpdateOrder', { orderId: order.orderId, unitPrice: 70, adjustCharge: false });
   assert.equal(r3.adjustedCharge, null);
 });
+
+// ---------------------------------------------------------------- foto do item e separar por membro
+test('foto no item do pedido aparece em Meus Pedidos', () => {
+  const { api, admin } = freshBackend();
+  const sale = admin('adminCreateSale', { buyer: { name: 'Lara', whatsapp: '62981613350' }, product: { name: 'PC antigo' }, unitPrice: 15 });
+  assert.equal(admin('adminUpdateOrder', { orderId: sale.order.orderId, image: 'https://x/pc.jpg' }).ok, true);
+  const mine = api.call('myOrders', { whatsapp: '62981613350', code: sale.order.orderId });
+  assert.equal(mine.orders[0].image, 'https://x/pc.jpg');
+  assert.match(mine.orders[0].history, /foto alterada/);
+});
+
+test('separar pedido "Jin e Jimin": divide valor e cobranças, mantendo o que foi pago', () => {
+  const { api, admin, gas } = freshBackend();
+  const sale = admin('adminCreateSale', {
+    buyer: { name: 'Thaty', whatsapp: '53991811761' }, product: { name: 'Jin e Jimin', group: 'BTS', member: 'OT7' }, unitPrice: 30,
+    payment: { mode: 'parcelado', installmentDates: ['2026-10-10', '2026-11-10'], paidInstallments: 1 }
+  });
+  const id = sale.order.orderId;
+  assert.equal(admin('adminSplitOrder', { orderId: id, parts: [{ productName: 'Jin', amount: 10 }, { productName: 'Jimin', amount: 10 }] }).ok, false, 'soma diferente');
+  const res = admin('adminSplitOrder', {
+    orderId: id,
+    parts: [
+      { productName: 'Photocard — Jin', member: 'Jin', amount: 15, image: 'https://x/jin.jpg' },
+      { productName: 'Photocard — Jimin', member: 'Jimin', amount: 15 }
+    ]
+  });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(res.orders[0].orderId, id, 'a 1ª parte mantém o código');
+  const mine = api.call('myOrders', { whatsapp: '53991811761', code: id });
+  assert.equal(mine.orders.length, 2);
+  const byMember = Object.fromEntries(mine.orders.map((o) => [o.member, o]));
+  assert.equal(byMember.Jin.itemTotal, 15);
+  assert.equal(byMember.Jin.image, 'https://x/jin.jpg');
+  assert.deepEqual(byMember.Jimin.charges.map((c) => [c.amount, c.status, c.dueDate]), [[7.5, 'Pago', '2026-10-10'], [7.5, 'Pendente', '2026-11-10']]);
+  assert.equal(mine.totals.paid, 15);
+  assert.equal(mine.totals.owed, 15);
+  assert.match(byMember.Jimin.history, /separado do pedido/);
+  const total = gas.state.sheets['Cobranças'].slice(1).reduce((a, r) => a + Number(r[4]), 0);
+  assert.equal(total, 30, 'nada some nem sobra nas cobranças');
+});
