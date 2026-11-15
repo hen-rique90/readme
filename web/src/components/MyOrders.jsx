@@ -237,10 +237,94 @@ export default function MyOrders({ config, session, onLogin, onSessionExpired })
                 ))}
               </ul>
             )}
+            {token && o.status !== 'Cancelado' && (
+              <TransferRequest order={o} token={token} config={config || data.config} onChanged={() => lookup()} onSessionExpired={onSessionExpired} />
+            )}
           </div>
         ))}
       </div>
     </main>
+  );
+}
+
+// Repasse pedido pela cliente: só para item já pago; a loja aprova
+function TransferRequest({ order, token, config, onChanged, onSessionExpired }) {
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState({ name: '', whatsapp: '', contact: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const active = order.charges.filter((c) => c.status !== 'Cancelada');
+  const fullyPaid = active.length > 0 && active.every((c) => c.status === 'Pago');
+  const pending = order.transferName || order.transferWhatsapp;
+
+  const call = async (action, params) => {
+    setBusy(true);
+    setError('');
+    try {
+      await api(action, { token, orderId: order.orderId, ...params });
+      setOpen(false);
+      onChanged();
+    } catch (err) {
+      if (err.sessionExpired) onSessionExpired();
+      else setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (pending) {
+    const msg = `Oii! 💜 Pedi pelo site o repasse do pedido ${order.orderId} (${order.quantity}x ${order.productName}) para ${order.transferName}. Pode aprovar?`;
+    return (
+      <div className="mt-3 p-3 rounded-xl bg-fuchsia-50 border border-fuchsia-200 text-xs space-y-2">
+        <p className="font-bold text-fuchsia-900">🔁 Repasse para {order.transferName} aguardando aprovação da loja.</p>
+        <div className="flex flex-wrap gap-2">
+          {config?.adminWhatsapp && (
+            <a href={waLink(config.adminWhatsapp, msg)} target="_blank" rel="noreferrer" className="btn-soft">
+              <Phone className="w-3.5 h-3.5" /> Avisar a loja
+            </a>
+          )}
+          <button type="button" disabled={busy} onClick={() => call('cancelTransferRequest', {})} className="btn-soft">
+            {busy && <Spinner className="w-3.5 h-3.5" />} Cancelar repasse
+          </button>
+        </div>
+        {error && <p className="text-rose-700 font-semibold">{error}</p>}
+      </div>
+    );
+  }
+
+  if (!fullyPaid) return null;
+
+  return (
+    <div className="mt-3">
+      {!open ? (
+        <button type="button" onClick={() => setOpen(true)} className="text-xs font-bold text-fuchsia-700 hover:underline">
+          🔁 Desistiu? Repassar este item para outra pessoa
+        </button>
+      ) : (
+        <form
+          className="p-3 rounded-xl bg-fuchsia-50 border border-fuchsia-200 space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            call('requestTransfer', to);
+          }}
+        >
+          <p className="text-xs text-fuchsia-900">
+            Informe quem vai ficar com o item. A loja confere e aprova; depois disso o pedido sai da sua conta e vai para a
+            outra pessoa. O acerto do valor que você já pagou é combinado entre vocês.
+          </p>
+          <input required minLength={2} value={to.name} onChange={(e) => setTo({ ...to, name: e.target.value })} placeholder="Nome de quem vai ficar" className="input" />
+          <div className="grid grid-cols-2 gap-2">
+            <input required type="tel" inputMode="numeric" value={to.whatsapp} onChange={(e) => setTo({ ...to, whatsapp: e.target.value })} placeholder="WhatsApp dela" className="input" />
+            <input value={to.contact} onChange={(e) => setTo({ ...to, contact: e.target.value })} placeholder="@ dela (opcional)" className="input" />
+          </div>
+          {error && <p className="text-xs text-rose-700 font-semibold">{error}</p>}
+          <div className="flex gap-2">
+            <button disabled={busy} className="btn-primary flex-1">{busy && <Spinner className="w-4 h-4" />} Pedir repasse</button>
+            <button type="button" onClick={() => setOpen(false)} className="btn-soft">Voltar</button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }
 

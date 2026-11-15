@@ -447,3 +447,88 @@ test('produto tem grupo de k-pop; sem grupo vale BTS', () => {
   assert.equal(byName['PC Born Pink — Lisa'].group, 'BLACKPINK');
   assert.equal(gas.state.sheets['Produtos'][0][13], 'Grupo');
 });
+
+// ---------------------------------------------------------------- registrar venda e repasse
+test('registrar venda: produto avulso com foto, Pix parcelado e parcelas já pagas', () => {
+  const { api, admin } = freshBackend();
+  const res = admin('adminCreateSale', {
+    buyer: { name: 'Lara', contact: '@lara', whatsapp: '62981613350' },
+    product: { name: 'DVD Arirang', image: 'https://x/dvd.jpg', group: 'BTS', member: 'OT7', category: 'Merch/DVD' },
+    unitPrice: 300, quantity: 1, date: '2026-09-10',
+    payment: { mode: 'parcelado', installmentDates: ['2026-10-10', '2026-11-10', '2026-12-10'], paidInstallments: 2 }
+  });
+  assert.equal(res.ok, true, res.error);
+  assert.deepEqual(res.charges.map((c) => [c.amount, c.status, c.dueDate]), [
+    [100, 'Pago', '2026-10-10'], [100, 'Pago', '2026-11-10'], [100, 'Pendente', '2026-12-10']
+  ]);
+  assert.equal(res.order.payment, 'Pix parcelado 3x');
+  assert.equal(api.call('catalog').products.length, 0, 'produto avulso fica oculto do catálogo');
+  const mine = api.call('myOrders', { whatsapp: '62981613350', code: res.order.orderId });
+  assert.equal(mine.totals.paid, 200);
+  assert.equal(mine.totals.owed, 100);
+  assert.equal(mine.orders[0].image, 'https://x/dvd.jpg');
+  assert.match(mine.orders[0].createdAt, /^2026-09-10/);
+});
+
+test('registrar venda: produto do catálogo, à vista pago, respeitando o estoque', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 1 });
+  const sale = admin('adminCreateSale', { buyer: { name: 'Thaty', whatsapp: '53991811761' }, productId: p.id, useStock: true, payment: { mode: 'avista', paid: true } });
+  assert.equal(sale.ok, true, sale.error);
+  assert.equal(sale.charges[0].status, 'Pago');
+  assert.equal(sale.order.unitPrice, 95);
+  assert.equal(api.call('catalog').products[0].available, 0);
+  assert.equal(admin('adminCreateSale', { buyer: { name: 'Outra', whatsapp: '11911112222' }, productId: p.id, useStock: true }).ok, false);
+});
+
+test('repasse pela cliente: só item pago, ADM aprova, pedido muda de dona', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 2 });
+  const reg = api.call('register', { name: 'Ana', contact: '@ana', whatsapp: '41999990000', password: '123456' });
+  const { order, charge } = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+
+  const unpaid = api.call('requestTransfer', { token: reg.token, orderId: order.orderId, name: 'Bia', whatsapp: '21977776666' });
+  assert.equal(unpaid.ok, false);
+  assert.match(unpaid.error, /pagos/);
+
+  admin('setChargeStatus', { chargeId: charge.chargeId, status: 'Pago' });
+  assert.equal(api.call('requestTransfer', { token: reg.token, orderId: order.orderId, name: 'Eu', whatsapp: '41999990000' }).ok, false);
+  const req = api.call('requestTransfer', { token: reg.token, orderId: order.orderId, name: 'Bia', whatsapp: '(21) 97777-6666' });
+  assert.equal(req.ok, true, req.error);
+  assert.equal(req.order.transferWhatsapp, '21977776666');
+  assert.equal(api.call('requestTransfer', { token: reg.token, orderId: order.orderId, name: 'Bia', whatsapp: '21977776666' }).ok, false, 'um pedido de repasse por vez');
+
+  // até a aprovação, continua com a Ana
+  assert.equal(api.call('myOrders', { token: reg.token }).orders.length, 1);
+  const ok = admin('adminApproveTransfer', { orderId: order.orderId });
+  assert.equal(ok.ok, true, ok.error);
+  assert.equal(api.call('myOrders', { token: reg.token }).orders.length, 0);
+  const bia = api.call('myOrders', { whatsapp: '21977776666', code: order.orderId });
+  assert.equal(bia.orders[0].buyerName, 'Bia');
+  assert.equal(bia.totals.paid, 95);
+  assert.match(bia.orders[0].history, /repasse aprovado: de Ana para Bia/);
+  assert.equal(/41999990000/.test(bia.orders[0].history), false, 'histórico não expõe telefone');
+});
+
+test('repasse: ADM recusa, cliente cancela, e ADM repassa direto mesmo sem pagamento', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3 });
+  const reg = api.call('register', { name: 'Ana', contact: '@ana', whatsapp: '41999990000', password: '123456' });
+  const a = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+  admin('setChargeStatus', { chargeId: a.charge.chargeId, status: 'Pago' });
+  api.call('requestTransfer', { token: reg.token, orderId: a.order.orderId, name: 'Bia', whatsapp: '21977776666' });
+  assert.equal(admin('adminRejectTransfer', { orderId: a.order.orderId }).ok, true);
+  assert.equal(api.call('myOrders', { token: reg.token }).orders[0].transferWhatsapp, '');
+  api.call('requestTransfer', { token: reg.token, orderId: a.order.orderId, name: 'Bia', whatsapp: '21977776666' });
+  assert.equal(api.call('cancelTransferRequest', { token: reg.token, orderId: a.order.orderId }).ok, true);
+
+  // claim no nome errado, ainda sem pagar: a ADM repassa e o pendente vai junto
+  const b = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+  const moved = admin('adminTransferOrder', { orderId: b.order.orderId, name: 'Carla', contact: '@carla', whatsapp: '11955554444' });
+  assert.equal(moved.ok, true, moved.error);
+  const carla = api.call('myOrders', { whatsapp: '11955554444', code: b.order.orderId });
+  assert.equal(carla.totals.owed, 95);
+  assert.equal(api.call('myOrders', { token: reg.token }).orders.length, 1);
+  // corrigir uma compradora "a identificar" (sem WhatsApp) pelo mesmo botão
+  assert.equal(admin('adminTransferOrder', { orderId: b.order.orderId, name: 'Carla Souza', contact: '@carla', whatsapp: '11955554444' }).ok, true);
+});

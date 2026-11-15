@@ -24,7 +24,8 @@ var SHEETS = {
 var HEADERS = {
   config: ['Chave', 'Valor', 'Descrição'],
   products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo', 'Prazo Pagamento', 'Datas Pix Parcelado', 'Frete', 'Condição', 'Grupo'],
-  orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento', 'Obs. da compradora'],
+  orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento', 'Obs. da compradora',
+    'Repasse: nome', 'Repasse: WhatsApp', 'Repasse: @', 'Histórico'],
   charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento'],
   clients: ['WhatsApp', 'Nome', '@ (Insta/Twitter)', 'Senha (protegida)', 'Sal', 'Criada em', 'Último acesso', 'Trocar senha']
 };
@@ -56,7 +57,7 @@ var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'no
 var ORDER_STATUSES = ['Reservado', 'Comprado', 'A caminho do Brasil', 'Chegou (na bag)', 'Enviado', 'Entregue', 'Cancelado'];
 var CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 var SHIPPING_OPTIONS = ['Guardar na bag', 'Enviar assim que chegar'];
-var SCHEMA_VERSION = '6';
+var SCHEMA_VERSION = '7';
 var DEFAULT_GROUP = 'BTS'; // produtos antigos, sem grupo, eram todos de BTS
 var SHIPPING_COST_OPTIONS = ['Frete incluso', 'Frete não incluso'];
 var CONDITION_OPTIONS = ['Novo', 'Lacrado', 'Aberto'];
@@ -94,7 +95,9 @@ var PUBLIC_ACTIONS = {
   updateProfile: actionUpdateProfile_,
   changePassword: actionChangePassword_,
   updateMyOrder: actionUpdateMyOrder_,
-  cancelMyOrder: actionCancelMyOrder_
+  cancelMyOrder: actionCancelMyOrder_,
+  requestTransfer: actionRequestTransfer_,
+  cancelTransferRequest: actionCancelTransferRequest_
 };
 
 var ADMIN_ACTIONS = {
@@ -110,7 +113,11 @@ var ADMIN_ACTIONS = {
   addBatchCharge: actionAddBatchCharge_,
   deleteCharge: actionDeleteCharge_,
   saveConfig: actionSaveConfig_,
-  adminResetPassword: actionAdminResetPassword_
+  adminResetPassword: actionAdminResetPassword_,
+  adminCreateSale: actionAdminCreateSale_,
+  adminTransferOrder: actionAdminTransferOrder_,
+  adminApproveTransfer: actionAdminApproveTransfer_,
+  adminRejectTransfer: actionAdminRejectTransfer_
 };
 
 // Ações que alteram a planilha e precisam da trava
@@ -118,7 +125,8 @@ var WRITE_ACTIONS = {
   claim: true, saveProduct: true, saveProductBatch: true, deleteProduct: true, setOrderStatus: true, setOrderNote: true,
   setChargeStatus: true, addCharge: true, addBatchCharge: true, deleteCharge: true, saveConfig: true,
   register: true, login: true, updateProfile: true, changePassword: true, updateMyOrder: true, cancelMyOrder: true,
-  adminResetPassword: true
+  adminResetPassword: true, adminCreateSale: true, adminTransferOrder: true, adminApproveTransfer: true,
+  adminRejectTransfer: true, requestTransfer: true, cancelTransferRequest: true
 };
 
 function handle_(action, params) {
@@ -422,14 +430,18 @@ function toOrder_(r) {
     status: str_(v[13]) || 'Reservado',
     note: str_(v[14]),
     payment: str_(v[15]),
-    buyerNote: str_(v[16])
+    buyerNote: str_(v[16]),
+    transferName: str_(v[17]),
+    transferWhatsapp: phone_(v[18]),
+    transferContact: str_(v[19]),
+    history: str_(v[20])
   };
 }
 
 function orderRow_(o) {
   return [o.orderId, dateCell_(o.createdAt), o.productId, o.productName,
     o.member, o.batch, o.buyerName, o.contact, o.whatsapp, o.quantity, o.unitPrice, o.itemTotal, o.shipping, o.status, o.note,
-    o.payment || '', o.buyerNote || ''];
+    o.payment || '', o.buyerNote || '', o.transferName || '', o.transferWhatsapp || '', o.transferContact || '', o.history || ''];
 }
 
 function toCharge_(r) {
@@ -839,16 +851,16 @@ function actionSetChargeStatus_(params) {
   return { ok: true };
 }
 
-function newCharge_(order, description, amount, existingIds, dueDate) {
+function newCharge_(order, description, amount, existingIds, dueDate, paid) {
   var charge = {
     chargeId: newId_('COB-', existingIds),
     orderId: order.orderId,
     whatsapp: order.whatsapp,
     description: description,
     amount: money_(amount),
-    status: 'Pendente',
+    status: paid ? 'Pago' : 'Pendente',
     createdAt: new Date().toISOString(),
-    paidAt: '',
+    paidAt: paid ? new Date().toISOString() : '',
     dueDate: dateKey_(dueDate)
   };
   existingIds[charge.chargeId] = true;
@@ -1162,4 +1174,202 @@ function actionAdminResetPassword_(params) {
   setPassword_(client, temp, true);
   writeRow_('clients', client.rowNumber, clientRow_(client));
   return { ok: true, tempPassword: temp, whatsapp: client.whatsapp, name: client.name };
+}
+
+
+// ----------------------------------------------------------------------------
+// REPASSE DE PEDIDOS
+// ----------------------------------------------------------------------------
+// - A cliente (logada) pede o repasse de um item JÁ PAGO, indicando quem fica
+//   com ele. Fica aguardando a aprovação da ADM.
+// - A ADM pode repassar qualquer pedido direto (ex.: claim feito no nome errado),
+//   o que também serve para corrigir nome/WhatsApp. O que falta pagar vai junto.
+
+function todayText_() {
+  var d = new Date();
+  return pad2_(d.getDate()) + '/' + pad2_(d.getMonth() + 1) + '/' + d.getFullYear();
+}
+
+function addHistory_(order, text) {
+  order.history = (order.history ? order.history + ' | ' : '') + todayText_() + ' ' + text;
+}
+
+function recipient_(params) {
+  var whatsapp = phone_(params.whatsapp);
+  var name = str_(params.name).slice(0, 80);
+  var contact = str_(params.contact).slice(0, 60);
+  if (whatsapp && (whatsapp.length < 10 || whatsapp.length > 11)) throw userError_('WhatsApp inválido. Use DDD + número, ex: 11988887777.');
+  var account = whatsapp ? findClient_(whatsapp) : null;
+  if (account) {
+    name = name || account.name;
+    contact = contact || account.contact;
+  }
+  if (name.length < 2) throw userError_('Informe o nome de quem vai ficar com o item.');
+  return { name: name, contact: contact, whatsapp: whatsapp };
+}
+
+function orderCharges_(order) {
+  return allCharges_().filter(function (c) { return c.orderId === order.orderId; });
+}
+
+function isFullyPaid_(charges) {
+  var active = charges.filter(function (c) { return c.status !== 'Cancelada'; });
+  return active.length > 0 && active.every(function (c) { return c.status === 'Pago'; });
+}
+
+// Passa o pedido (e as cobranças) para outra pessoa
+function transfer_(order, to, how) {
+  var from = order.buyerName;
+  order.buyerName = to.name;
+  order.contact = to.contact;
+  order.whatsapp = to.whatsapp;
+  order.transferName = '';
+  order.transferWhatsapp = '';
+  order.transferContact = '';
+  addHistory_(order, how + ': de ' + from + ' para ' + to.name);
+  writeRow_('orders', order.rowNumber, orderRow_(order));
+  orderCharges_(order).forEach(function (c) {
+    c.whatsapp = to.whatsapp;
+    writeRow_('charges', c.rowNumber, chargeRow_(c));
+  });
+  return strip_(order);
+}
+
+function actionRequestTransfer_(params) {
+  var order = myOrder_(params);
+  if (order.status === 'Cancelado') throw userError_('Esse pedido está cancelado.');
+  if (order.transferWhatsapp || order.transferName) throw userError_('Já existe um pedido de repasse aguardando a loja.');
+  if (!isFullyPaid_(orderCharges_(order))) throw userError_('Só dá para repassar itens que já estão totalmente pagos.');
+  var to = recipient_(params);
+  if (!to.whatsapp) throw userError_('Informe o WhatsApp de quem vai ficar com o item.');
+  if (to.whatsapp === order.whatsapp) throw userError_('Informe o WhatsApp de outra pessoa.');
+  order.transferName = to.name;
+  order.transferWhatsapp = to.whatsapp;
+  order.transferContact = to.contact;
+  addHistory_(order, 'repasse pedido pela compradora para ' + to.name);
+  writeRow_('orders', order.rowNumber, orderRow_(order));
+  return { ok: true, order: strip_(order) };
+}
+
+function actionCancelTransferRequest_(params) {
+  var order = myOrder_(params);
+  if (!order.transferWhatsapp && !order.transferName) throw userError_('Não há pedido de repasse.');
+  order.transferName = '';
+  order.transferWhatsapp = '';
+  order.transferContact = '';
+  addHistory_(order, 'repasse cancelado pela compradora');
+  writeRow_('orders', order.rowNumber, orderRow_(order));
+  return { ok: true, order: strip_(order) };
+}
+
+function actionAdminApproveTransfer_(params) {
+  var order = findOrder_(params.orderId);
+  if (!order.transferWhatsapp && !order.transferName) throw userError_('Esse pedido não tem repasse pendente.');
+  var to = recipient_({ name: order.transferName, whatsapp: order.transferWhatsapp, contact: order.transferContact });
+  return { ok: true, order: transfer_(order, to, 'repasse aprovado') };
+}
+
+function actionAdminRejectTransfer_(params) {
+  var order = findOrder_(params.orderId);
+  if (!order.transferWhatsapp && !order.transferName) throw userError_('Esse pedido não tem repasse pendente.');
+  order.transferName = '';
+  order.transferWhatsapp = '';
+  order.transferContact = '';
+  addHistory_(order, 'repasse recusado pela loja');
+  writeRow_('orders', order.rowNumber, orderRow_(order));
+  return { ok: true };
+}
+
+// ADM repassa (ou corrige a compradora) direto, em qualquer situação de pagamento
+function actionAdminTransferOrder_(params) {
+  var order = findOrder_(params.orderId);
+  var to = recipient_(params);
+  if (to.whatsapp === order.whatsapp && to.name === order.buyerName && to.contact === order.contact) {
+    throw userError_('Nada mudou.');
+  }
+  return { ok: true, order: transfer_(order, to, 'repassado pela loja') };
+}
+
+// ----------------------------------------------------------------------------
+// REGISTRAR VENDA (feita fora do site / antes do sistema)
+// ----------------------------------------------------------------------------
+function actionAdminCreateSale_(params) {
+  var buyer = recipient_(params.buyer || {});
+  var quantity = Math.floor(num_(params.quantity)) || 1;
+  if (quantity < 1) throw userError_('Quantidade inválida.');
+
+  var products = allProducts_();
+  var product = null;
+  if (str_(params.productId)) {
+    products.forEach(function (p) { if (p.id === str_(params.productId)) product = p; });
+    if (!product) throw userError_('Produto não encontrado.');
+    if (params.useStock) {
+      var available = Math.max(0, product.totalStock - (soldMap_(allOrders_())[product.id] || 0));
+      if (quantity > available) throw userError_('Só restam ' + available + ' unidade(s) desse item no estoque.');
+    }
+  } else {
+    // Produto avulso: vira um item oculto (não aparece no catálogo)
+    var input = params.product || {};
+    var data = {};
+    Object.keys(input).forEach(function (k) { data[k] = input[k]; });
+    data.price = params.unitPrice;
+    data.totalStock = quantity;
+    data.active = false;
+    product = productFromInput_(data, nextIds_(products, 1)[0]);
+    appendRow_('products', productRow_(product));
+  }
+
+  var unitPrice = money_(params.unitPrice === undefined || params.unitPrice === '' ? product.price : params.unitPrice);
+  if (unitPrice <= 0) throw userError_('Informe o valor.');
+  var total = money_(unitPrice * quantity);
+  var created = params.date ? dateCell_(dateKey_(params.date) + 'T12:00:00') : new Date();
+  if (!(created instanceof Date) || isNaN(created.getTime())) created = new Date();
+
+  var pay = params.payment || {};
+  var parts;
+  var label;
+  if (pay.mode === 'parcelado') {
+    var dates = dateList_(pay.installmentDates || []);
+    if (dates.length < 2) throw userError_('No Pix parcelado, preencha pelo menos 2 datas.');
+    var paidCount = Math.max(0, Math.min(dates.length, Math.floor(num_(pay.paidInstallments))));
+    parts = paymentPlan_({ installmentDates: dates }, total, true).parts.map(function (part, i) {
+      part.paid = i < paidCount;
+      return part;
+    });
+    label = 'Pix parcelado ' + dates.length + 'x';
+  } else {
+    parts = [{ description: '1ª fase — valor do item', amount: total, dueDate: dateKey_(pay.dueDate), paid: !!pay.paid }];
+    label = 'Pix à vista';
+  }
+
+  var ids = {};
+  allOrders_().forEach(function (o) { ids[o.orderId] = true; });
+  var order = {
+    orderId: newId_('PED-', ids),
+    createdAt: created,
+    productId: product.id,
+    productName: product.name,
+    member: product.member,
+    batch: str_(params.batch) || product.batch,
+    buyerName: buyer.name,
+    contact: buyer.contact,
+    whatsapp: buyer.whatsapp,
+    quantity: quantity,
+    unitPrice: unitPrice,
+    itemTotal: total,
+    shipping: SHIPPING_OPTIONS.indexOf(str_(params.shipping)) >= 0 ? str_(params.shipping) : SHIPPING_OPTIONS[0],
+    status: ORDER_STATUSES.indexOf(str_(params.status)) >= 0 ? str_(params.status) : 'Comprado',
+    note: str_(params.note).slice(0, 300),
+    buyerNote: '',
+    payment: label
+  };
+  addHistory_(order, 'venda registrada pela loja');
+  appendRow_('orders', orderRow_(order));
+
+  var chargeIdsMap = chargeIds_();
+  var charges = parts.map(function (part) {
+    return newCharge_(order, part.description, part.amount, chargeIdsMap, part.dueDate, part.paid);
+  });
+  order.createdAt = created.toISOString();
+  return { ok: true, order: order, charges: charges, product: product };
 }

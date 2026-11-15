@@ -29,6 +29,11 @@ Ferramenta para anunciar os produtos da CEG. A compradora faz o claim e o item f
 - As senhas ficam na aba `Clientes` **protegidas (hash com sal)** — ninguém consegue lê-las. A sessão é um token assinado; trocar a senha encerra as sessões antigas.
 - Em **ADM → Configurações** dá para desligar "Exigir conta para fazer claim".
 
+## Vendas fora do site e repasses
+- **ADM → Registrar venda:** para vendas feitas no WhatsApp/grupo ou antes do sistema. Escolha a compradora (ou digite uma nova), o produto (do catálogo ou digitado, com link da foto), quantidade, valor e o pagamento: **à vista** (pago ou pendente, com prazo) ou **Pix parcelado** (datas das parcelas + quantas já foram pagas). Produto digitado vira um item oculto (não aparece no catálogo).
+- **Repasse pela cliente:** em "Meus Pedidos" (logada), itens **totalmente pagos** têm "Repassar este item": ela informa nome e WhatsApp de quem fica com o item e o pedido aguarda a **aprovação da ADM** (ADM → Pedidos → "Repasses aguardando").
+- **Repasse pela ADM:** em cada pedido, "Repassar para outra pessoa / corrigir compradora" — para claim feito no nome errado (vale mesmo sem pagamento; o que falta pagar vai junto) ou para corrigir nome/WhatsApp. Tudo fica no **Histórico** do pedido.
+
 ## Estrutura
 
 ```

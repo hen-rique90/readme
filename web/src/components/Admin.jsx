@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown, ChevronUp, Download, Edit3, Eye, EyeOff, KeyRound, Lock, LogOut, Package, Phone, Plus,
-  ReceiptText, RefreshCw, Settings, Trash2, Truck, Users
+  ReceiptText, RefreshCw, Settings, ShoppingCart, Trash2, Truck, Users
 } from 'lucide-react';
 import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
 import {
@@ -10,6 +10,7 @@ import {
   formatDay, formatDayShort, isAlbumLink, isOverdue, memberBadgeColor, orderStatusColor, splitInstallments, waLink
 } from '../utils';
 import { Badge, DateListInput, DueBadge, Modal, ProductImage, ProductTags, Spinner } from './common';
+import SaleTab from './SaleTab';
 
 const PASS_KEY = 'ceg_adm_senha';
 const CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
@@ -80,6 +81,7 @@ export default function Admin({ showToast, onCatalogChange }) {
 
   const tabs = [
     ['orders', ReceiptText, `Pedidos (${data.orders.length})`],
+    ['sale', ShoppingCart, 'Registrar venda'],
     ['buyers', Users, 'Compradoras'],
     ['products', Package, `Produtos (${data.products.length})`],
     ['batch', Truck, 'Cobrar frete do lote'],
@@ -119,6 +121,7 @@ export default function Admin({ showToast, onCatalogChange }) {
 
       {tab === 'orders' && <OrdersTab data={data} run={run} />}
       {tab === 'buyers' && <BuyersTab data={data} run={run} />}
+      {tab === 'sale' && <SaleTab data={data} run={run} />}
       {tab === 'products' && <ProductsTab data={data} run={run} />}
       {tab === 'batch' && <BatchChargeTab data={data} run={run} />}
       {tab === 'settings' && <SettingsTab data={data} run={run} />}
@@ -201,6 +204,9 @@ function OrdersTab({ data, run }) {
   const [batch, setBatch] = useState('');
   const [status, setStatus] = useState('');
   const [onlyOwing, setOnlyOwing] = useState(false);
+  const [onlyTransfers, setOnlyTransfers] = useState(false);
+  const [transferred, setTransferred] = useState(null); // aviso depois de repassar (o pedido pode sair do filtro)
+  const pendingTransfers = data.orders.filter((o) => o.transferName || o.transferWhatsapp).length;
   const [expanded, setExpanded] = useState(null);
   const chargesByOrder = useChargesByOrder(data.charges);
   const batches = [...new Set(data.orders.map((o) => o.batch).filter(Boolean))];
@@ -212,7 +218,8 @@ function OrdersTab({ data, run }) {
       (!q || `${o.orderId} ${o.buyerName} ${o.contact} ${o.whatsapp} ${o.productName} ${o.productId}`.toLowerCase().includes(q)) &&
       (!batch || o.batch === batch) &&
       (!status || o.status === status) &&
-      (!onlyOwing || owed > 0)
+      (!onlyOwing || owed > 0) &&
+      (!(onlyTransfers && pendingTransfers > 0) || !!(o.transferName || o.transferWhatsapp))
     );
   });
 
@@ -232,7 +239,31 @@ function OrdersTab({ data, run }) {
           <input type="checkbox" checked={onlyOwing} onChange={(e) => setOnlyOwing(e.target.checked)} className="w-4 h-4 accent-purple-600" />
           Só com pagamento pendente
         </label>
+        {pendingTransfers > 0 && (
+          <label className="flex items-center gap-2 text-xs font-bold text-fuchsia-700 bg-fuchsia-50 px-2.5 py-1.5 rounded-lg">
+            <input type="checkbox" checked={onlyTransfers} onChange={(e) => setOnlyTransfers(e.target.checked)} className="w-4 h-4 accent-fuchsia-600" />
+            🔁 Repasses aguardando ({pendingTransfers})
+          </label>
+        )}
       </div>
+      {transferred && (
+        <Modal onClose={() => setTransferred(null)}>
+          <div className="space-y-3 text-center">
+            <h3 className="text-lg font-extrabold text-slate-800 pr-8">Pedido repassado para {transferred.buyerName} ✓</h3>
+            <p className="text-sm text-slate-600">
+              {transferred.quantity}x {transferred.productName} • <span className="font-mono">{transferred.orderId}</span>
+            </p>
+            {transferNotifyLink(transferred) ? (
+              <a href={transferNotifyLink(transferred)} target="_blank" rel="noreferrer"
+                className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2">
+                <Phone className="w-4 h-4" /> Avisar a nova compradora
+              </a>
+            ) : (
+              <p className="text-xs text-amber-700">Sem WhatsApp cadastrado para avisar.</p>
+            )}
+          </div>
+        </Modal>
+      )}
       <p className="px-4 pt-3 text-[11px] text-slate-500">
         Mudar para <strong>Cancelado</strong> devolve o item ao estoque e cancela as cobranças pendentes. Clique na seta para ver e marcar pagamentos.
       </p>
@@ -282,6 +313,11 @@ function OrdersTab({ data, run }) {
                           💬 {o.buyerNote}
                         </span>
                       )}
+                      {(o.transferName || o.transferWhatsapp) && (
+                        <span className="mt-1 ml-1 inline-block px-2 py-1 rounded-lg bg-fuchsia-50 border border-fuchsia-200 text-[11px] font-bold text-fuchsia-800">
+                          🔁 Repasse para {o.transferName} — aguardando você
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-3 whitespace-nowrap">
                       <span className="block text-emerald-700 font-bold">{formatBRL(paid)}</span>
@@ -310,7 +346,7 @@ function OrdersTab({ data, run }) {
                   {isOpen && (
                     <tr className="bg-purple-50/40">
                       <td colSpan={7} className="p-4">
-                        <OrderDetails order={o} charges={charges} run={run} />
+                        <OrderDetails order={o} charges={charges} run={run} onTransferred={setTransferred} />
                       </td>
                     </tr>
                   )}
@@ -324,7 +360,7 @@ function OrdersTab({ data, run }) {
   );
 }
 
-function OrderDetails({ order, charges, run }) {
+function OrderDetails({ order, charges, run, onTransferred }) {
   const [desc, setDesc] = useState('Frete internacional');
   const [amount, setAmount] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -400,7 +436,89 @@ function OrderDetails({ order, charges, run }) {
             <button className="btn-soft">Salvar</button>
           </div>
         </form>
+        <TransferBox order={order} charges={charges} run={run} onTransferred={onTransferred} />
+        {order.history && (
+          <div className="bg-white rounded-xl p-3 border border-purple-100">
+            <h4 className="font-extrabold text-slate-800 text-sm mb-1">Histórico</h4>
+            <ul className="text-[11px] text-slate-500 space-y-0.5">
+              {order.history.split(' | ').map((h, i) => <li key={i}>• {h}</li>)}
+            </ul>
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+function transferNotifyLink(o) {
+  return (
+    o.whatsapp &&
+    waLink(o.whatsapp, `Oii ${o.buyerName.split(' ')[0]}! 💜 O item ${o.quantity}x ${o.productName} (pedido ${o.orderId}) agora está no seu nome na CEG.\nVocê acompanha em "Meus Pedidos" no site. Para criar sua conta, use seu WhatsApp e o código ${o.orderId}.`)
+  );
+}
+
+function TransferBox({ order, charges, run, onTransferred }) {
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState({ name: '', contact: '', whatsapp: '' });
+  const pending = order.transferName || order.transferWhatsapp;
+  const paid = charges.filter((c) => c.status === 'Pago').reduce((a, c) => a + c.amount, 0);
+  const owed = charges.filter((c) => c.status === 'Pendente').reduce((a, c) => a + c.amount, 0);
+  if (pending) {
+    return (
+      <div className="bg-fuchsia-50 rounded-xl p-3 border border-fuchsia-200 space-y-2">
+        <h4 className="font-extrabold text-fuchsia-900 text-sm">🔁 Pedido de repasse da compradora</h4>
+        <p className="text-sm text-slate-700">
+          {order.buyerName} quer repassar para <strong>{order.transferName}</strong>
+          {order.transferWhatsapp && <> ({formatPhone(order.transferWhatsapp)})</>}
+          {order.transferContact && <> {order.transferContact}</>}.
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="btn-primary flex-1"
+            onClick={async () => {
+              const res = await run('adminApproveTransfer', { orderId: order.orderId }, 'Repasse aprovado!');
+              if (res) onTransferred(res.order);
+            }}
+          >
+            Aprovar repasse
+          </button>
+          <button type="button" className="btn-soft" onClick={() => window.confirm('Recusar este repasse?') && run('adminRejectTransfer', { orderId: order.orderId }, 'Repasse recusado')}>
+            Recusar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl p-3 border border-purple-100 space-y-2">
+      <button type="button" onClick={() => setOpen(!open)} className="w-full flex items-center justify-between font-extrabold text-slate-800 text-sm">
+        🔁 Repassar para outra pessoa / corrigir compradora
+        {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+      </button>
+      {open && (
+        <form
+          className="space-y-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!window.confirm(`Passar o pedido ${order.orderId} de ${order.buyerName} para ${to.name}?`)) return;
+            const res = await run('adminTransferOrder', { orderId: order.orderId, ...to }, 'Pedido repassado!');
+            if (res) onTransferred(res.order);
+          }}
+        >
+          <p className="text-[11px] text-slate-500">
+            Use quando a cliente fez o claim no nome dela mas era para outra pessoa, ou para corrigir nome/WhatsApp.
+            Vai junto: {formatBRL(paid)} já pago e {formatBRL(owed)} que falta pagar.
+          </p>
+          <input required minLength={2} value={to.name} onChange={(e) => setTo({ ...to, name: e.target.value })} placeholder="Nome de quem fica com o item" className="input" />
+          <div className="grid grid-cols-2 gap-2">
+            <input type="tel" inputMode="numeric" value={to.whatsapp} onChange={(e) => setTo({ ...to, whatsapp: e.target.value })} placeholder="WhatsApp com DDD" className="input" />
+            <input value={to.contact} onChange={(e) => setTo({ ...to, contact: e.target.value })} placeholder="@ (opcional)" className="input" />
+          </div>
+          <button className="btn-primary w-full">Repassar pedido</button>
+        </form>
+      )}
     </div>
   );
 }
