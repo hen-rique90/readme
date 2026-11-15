@@ -5,6 +5,7 @@ import {
   splitInstallments, todayKey, waLink, wholeGroupLabel
 } from '../utils';
 import { DateListInput, PhoneInput, ProductImage, Spinner } from './common';
+import { PhotoButton } from './PhotoUpload';
 
 const EMPTY = {
   name: '', contact: '', whatsapp: '',
@@ -189,6 +190,7 @@ export default function SaleTab({ data, run }) {
                 <label className="label">Link da foto</label>
                 <div className="flex gap-2 items-center">
                   <input type="url" value={form.image} onChange={set('image')} placeholder="https://… (Drive ou Imgur)" className="input" />
+                  <PhotoButton name={form.productName} onUploaded={(url) => setForm((f) => ({ ...f, image: url }))} />
                   {form.image && <ProductImage src={form.image} className="w-12 h-12 rounded-xl border border-purple-100 shrink-0" />}
                 </div>
               </div>

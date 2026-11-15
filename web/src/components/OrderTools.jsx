@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { detectMembers, formatBRL, nameWithoutMembers, splitInstallments } from '../utils';
 import { Modal, ProductImage, Spinner } from './common';
+import { PhotoButton } from './PhotoUpload';
 
 const partName = (rest, member) => (rest ? `${rest} — ${member}` : member);
 
@@ -17,7 +18,7 @@ export function SplitOrderModal({ order, group, run, onClose }) {
   const [busy, setBusy] = useState(false);
   const sum = Math.round(parts.reduce((a, p) => a + (Number(p.amount) || 0), 0) * 100) / 100;
   const diff = Math.round((order.itemTotal - sum) * 100) / 100;
-  const setPart = (i, patch) => setParts(parts.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const setPart = (i, patch) => setParts((ps) => ps.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const redistribute = (list) => {
     const values = splitInstallments(order.itemTotal, list.length);
     return list.map((p, i) => ({ ...p, amount: values[i] }));
@@ -72,6 +73,7 @@ export function SplitOrderModal({ order, group, run, onClose }) {
               </button>
               <div className="col-span-full flex items-center gap-2">
                 <input type="url" value={p.image} onChange={(e) => setPart(i, { image: e.target.value })} placeholder="Foto desta parte (opcional)" className="input py-1.5 text-xs" />
+                <PhotoButton name={p.productName} onUploaded={(url) => setPart(i, { image: url })} />
                 {p.image && <ProductImage src={p.image} className="w-9 h-9 rounded-lg shrink-0" />}
               </div>
             </div>

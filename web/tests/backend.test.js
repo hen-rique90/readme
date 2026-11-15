@@ -953,3 +953,21 @@ test('frete: cotação de teste no painel e aviso de token vencido', () => {
   assert.equal(JSON.stringify(gas.fetches.at(-2).options.headers['User-Agent']), JSON.stringify('Cantinho da Army CEG (loja@exemplo.com)'));
   assert.equal(admin('adminTestShippingQuote', { cep: '123' }).ok, false);
 });
+
+test('fotos: ADM envia foto do celular para a pasta do Drive', () => {
+  const { api: backend, gas } = freshBackend();
+  const up = (params) => backend.call('adminUploadPhoto', { password: PASSWORD, mimeType: 'image/jpeg', name: 'Photocard Jimin', data: 'data:image/jpeg;base64,QUJD', ...params });
+  assert.equal(backend.call('adminUploadPhoto', { password: 'errada', mimeType: 'image/jpeg', data: 'QUJD' }).ok, false);
+  assert.match(up({ mimeType: 'application/pdf' }).error, /JPG, PNG ou WEBP/);
+  assert.match(up({ data: '' }).error, /vazia/);
+  const r = up();
+  assert.equal(r.ok, true);
+  assert.match(r.url, /^https:\/\/drive\.google\.com\/file\/d\/[\w-]+\/view/);
+  const file = gas.files[r.fileId];
+  assert.equal(file.data, 'QUJD'); // o prefixo data: é retirado
+  assert.equal(file.sharing, 'ANYONE_WITH_LINK:VIEW');
+  assert.match(file.name, /^Photocard Jimin \d+\.jpg$/);
+  // a segunda foto vai para a mesma pasta
+  const r2 = up();
+  assert.equal(gas.files[r2.fileId].folder, file.folder);
+});

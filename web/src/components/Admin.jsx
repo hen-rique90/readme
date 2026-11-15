@@ -16,6 +16,7 @@ import { EditBuyerModal, MergeBuyerModal, SameNamePanel } from './BuyerTools';
 import { SplitOrderModal } from './OrderTools';
 import RequestsTab from './RequestsTab';
 import ShipmentsTab, { ShippingSettings } from './ShipmentsTab';
+import { PhotoButton, PhotoUploader } from './PhotoUpload';
 
 const PASS_KEY = 'ceg_adm_senha';
 const CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
@@ -78,6 +79,11 @@ export default function Admin({ showToast, onCatalogChange }) {
     }
   }, [password, load, showToast, onCatalogChange, logout]);
 
+  const uploadPhoto = useCallback(
+    async (data, name) => (await api('adminUploadPhoto', { data, mimeType: 'image/jpeg', name, password })).url,
+    [password]
+  );
+
   if (!data) {
     return <Login loading={loading} onLogin={async (pass) => {
       if (await load(pass)) {
@@ -107,6 +113,7 @@ export default function Admin({ showToast, onCatalogChange }) {
   ];
 
   return (
+    <PhotoUploader.Provider value={uploadPhoto}>
     <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-5">
       <Stats data={data} />
 
@@ -176,6 +183,7 @@ export default function Admin({ showToast, onCatalogChange }) {
         </div>
       )}
     </main>
+    </PhotoUploader.Provider>
   );
 }
 
@@ -487,6 +495,7 @@ function EditItem({ order, run, productImage }) {
       <input required value={form.productName} onChange={set('productName')} className="input py-1.5" aria-label="Produto" />
       <div className="flex gap-2 items-center">
         <input type="url" value={form.image} onChange={set('image')} placeholder="Link da foto (Drive ou Imgur)" className="input py-1.5" aria-label="Foto" />
+        <PhotoButton name={form.productName} onUploaded={(url) => setForm((f) => ({ ...f, image: url }))} />
         <ProductImage src={form.image || productImage} className="w-10 h-10 rounded-lg border border-purple-100 shrink-0" emojiSize="text-sm" />
       </div>
       {!form.image && productImage && <p className="text-[11px] text-slate-400">Sem foto própria: usa a foto do produto do catálogo.</p>}
@@ -935,7 +944,7 @@ function ProductsTab({ data, run }) {
     setVariants({});
     setForm({ ...form, group: isOther ? '' : value, member: isOther ? '' : wholeGroupLabel(value) });
   };
-  const setVariant = (m, patch) => setVariants({ ...variants, [m]: { totalStock: 1, image: '', ...variants[m], ...patch } });
+  const setVariant = (m, patch) => setVariants((vs) => ({ ...vs, [m]: { totalStock: 1, image: '', ...vs[m], ...patch } }));
 
   const reset = () => {
     setEditing(null);
@@ -1155,6 +1164,7 @@ function ProductsTab({ data, run }) {
                         className="input py-1.5"
                         aria-label={`Foto de ${m}`}
                       />
+                      <PhotoButton className="col-span-full" name={`${form.name} ${m}`} onUploaded={(url) => setVariant(m, { image: url })} />
                     </div>
                   )}
                 </div>
@@ -1193,7 +1203,10 @@ function ProductsTab({ data, run }) {
         </div>
         <div>
           <label className="label">{byMember && !editing ? 'Foto geral (opcional)' : 'Link da foto'}</label>
-          <input type="url" value={form.image} onChange={set('image')} placeholder="https://..." className="input" />
+          <div className="flex gap-2 items-start">
+            <input type="url" value={form.image} onChange={set('image')} placeholder="https://..." className="input" />
+            <PhotoButton name={form.name} onUploaded={(url) => setForm((f) => ({ ...f, image: url }))} />
+          </div>
           {form.image && (
             <div className="mt-2 flex items-center gap-3">
               <ProductImage src={form.image} className="w-20 h-20 rounded-xl border border-purple-100 shrink-0" />
