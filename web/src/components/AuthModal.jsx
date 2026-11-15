@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { KeyRound, LogOut, Phone, UserRound } from 'lucide-react';
 import { api, IS_DEMO } from '../api';
 import { formatPhone, loadBuyer, saveBuyer, waLink } from '../utils';
-import { Modal, Spinner } from './common';
+import { Modal, PhoneInput, Spinner } from './common';
 
 // mode: 'login' | 'register' | 'account' | 'changePassword'
 export default function AuthModal({ initialMode = 'login', reason, config, session, onClose, onSession, onLogout, showToast }) {
@@ -150,7 +150,7 @@ export default function AuthModal({ initialMode = 'login', reason, config, sessi
             <form onSubmit={login} className="space-y-3">
               <div>
                 <label className="label">WhatsApp com DDD</label>
-                <input required type="tel" inputMode="numeric" autoComplete="username" value={form.whatsapp} onChange={set('whatsapp')} placeholder="11999998888" className="input" />
+                <PhoneInput required autoComplete="username" value={form.whatsapp} onChange={set('whatsapp')} placeholder="(11) 99999-8888" className="input" />
               </div>
               <div>
                 <label className="label">Senha</label>
@@ -178,7 +178,7 @@ export default function AuthModal({ initialMode = 'login', reason, config, sessi
                 </div>
                 <div>
                   <label className="label">WhatsApp com DDD *</label>
-                  <input required type="tel" inputMode="numeric" autoComplete="username" value={form.whatsapp} onChange={set('whatsapp')} placeholder="11999998888" className="input" />
+                  <PhoneInput required autoComplete="username" value={form.whatsapp} onChange={set('whatsapp')} placeholder="(11) 99999-8888" className="input" />
                 </div>
               </div>
               {passwordFields()}

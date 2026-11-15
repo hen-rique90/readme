@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { formatDay, formatDayShort, imageCandidates, isOverdue } from '../utils';
+import { formatDay, formatDayShort, formatPhoneTyping, imageCandidates, isOverdue, phoneDigits } from '../utils';
 import { Check, Copy, Loader2, Sparkles, X } from 'lucide-react';
 
 export function Toast({ toast, onClose }) {
@@ -174,5 +174,28 @@ export function ProductTags({ product, className = '' }) {
       {product.shippingCost === 'Frete incluso' && <Badge className="bg-emerald-50 text-emerald-800 border-emerald-200">🚚 Frete incluso</Badge>}
       {product.shippingCost === 'Frete não incluso' && <Badge className="bg-slate-50 text-slate-600 border-slate-200">Frete à parte</Badge>}
     </span>
+  );
+}
+
+// Campo de WhatsApp que se formata sozinho: (11) 98888-7777
+export function PhoneInput({ value, onChange, ...props }) {
+  const shown = formatPhoneTyping(value);
+  const handle = (e) => {
+    const raw = e.target.value;
+    let digits = phoneDigits(raw);
+    // apagou um "(", ")", " " ou "-": apaga o número antes dele
+    if (raw.length < shown.length && digits === phoneDigits(shown)) digits = digits.slice(0, -1);
+    onChange({ target: { value: formatPhoneTyping(digits) } });
+  };
+  return (
+    <input
+      {...props}
+      type="tel"
+      inputMode="numeric"
+      autoComplete={props.autoComplete || 'tel-national'}
+      value={shown}
+      onChange={handle}
+      placeholder={props.placeholder || '(11) 99999-8888'}
+    />
   );
 }

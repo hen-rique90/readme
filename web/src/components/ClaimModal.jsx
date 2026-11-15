@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { CheckCircle2, Phone, ReceiptText, Undo2, UserRound } from 'lucide-react';
 import { api } from '../api';
 import { formatBRL, formatDay, formatDayShort, groupOf, loadBuyer, saveBuyer, splitInstallments, waLink } from '../utils';
-import { CopyButton, Modal, PixBox, ProductImage, ProductTags, Spinner } from './common';
+import { CopyButton, Modal, PhoneInput, PixBox, ProductImage, ProductTags, Spinner } from './common';
 
 export default function ClaimModal({
   product, config, session, initialResult = null, onClose, onClaimed, onViewOrders, onLoginRequired, onSessionExpired, showToast
@@ -202,13 +202,11 @@ export default function ClaimModal({
           </div>
           <div>
             <label className="label">WhatsApp com DDD *</label>
-            <input
+            <PhoneInput
               required
-              type="tel"
-              inputMode="numeric"
               value={form.whatsapp}
               onChange={set('whatsapp')}
-              placeholder="11999998888"
+              placeholder="(11) 99999-8888"
               className="input"
             />
           </div>

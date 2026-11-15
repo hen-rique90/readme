@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { formatPhone, sameNameGroups } from '../utils';
-import { Badge, Modal, Spinner } from './common';
+import { Badge, Modal, PhoneInput, Spinner } from './common';
 
 // Corrige nome/@/WhatsApp de TODOS os pedidos, cobranças e da conta de uma compradora
 async function updateBuyer(call, params, askMerge) {
@@ -60,7 +60,7 @@ export function EditBuyerModal({ buyer, call, reload, showToast, onClose }) {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label">WhatsApp com DDD</label>
-            <input required type="tel" inputMode="numeric" value={form.whatsapp} onChange={set('whatsapp')} className="input" />
+            <PhoneInput required value={form.whatsapp} onChange={set('whatsapp')} className="input" />
           </div>
           <div>
             <label className="label">@ (Insta / Twitter)</label>
