@@ -165,3 +165,59 @@ export const splitInstallments = (total, n) => {
   parts.push(Math.round((total - each * (n - 1)) * 100) / 100);
   return parts;
 };
+
+// ---- Telefones usados por pessoas com nomes diferentes
+const plainName = (n) =>
+  String(n || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z ]/g, ' ')
+    .trim()
+    .split(/\s+/)[0] || '';
+
+// distância de edição (para "Soraya" x "Soraia" contar como parecido)
+const editDistance = (a, b) => {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return dp[a.length][b.length];
+};
+
+export const sameFirstName = (a, b) => {
+  const x = plainName(a);
+  const y = plainName(b);
+  if (!x || !y) return true;
+  return x === y || x.startsWith(y) || y.startsWith(x) || editDistance(x, y) <= 2;
+};
+
+/**
+ * Agrupa por WhatsApp e devolve os números com nomes diferentes.
+ * severity "diferente": primeiros nomes realmente diferentes (provável outra pessoa);
+ * "parecido": variações de escrita (Soraya/Soraia).
+ */
+export const phoneConflicts = (orders, clients = []) => {
+  const map = {};
+  const add = (whatsapp, name, source, order) => {
+    if (!whatsapp || !name) return;
+    const g = (map[whatsapp] = map[whatsapp] || { whatsapp, names: {}, orders: [] });
+    const key = name.trim();
+    g.names[key] = g.names[key] || { name: key, count: 0, account: false };
+    if (source === 'account') g.names[key].account = true;
+    else g.names[key].count++;
+    if (order) g.orders.push(order);
+  };
+  orders.forEach((o) => add(o.whatsapp, o.buyerName, 'order', o));
+  clients.forEach((c) => add(c.whatsapp, c.name, 'account'));
+  return Object.values(map)
+    .map((g) => {
+      const names = Object.values(g.names);
+      if (names.length < 2) return null;
+      const different = names.some((a) => names.some((b) => !sameFirstName(a.name, b.name)));
+      return { ...g, names, severity: different ? 'diferente' : 'parecido' };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'diferente' ? -1 : 1));
+};
