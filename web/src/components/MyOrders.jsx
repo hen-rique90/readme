@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock, LogOut, Package, Phone, ReceiptText } from 'lucide-react';
 import { api, IS_DEMO } from '../api';
 import { chargeStatusColor, formatBRL, formatDate, formatDay, formatPhone, isOverdue, loadBuyer, orderStatusColor, saveBuyer, waLink } from '../utils';
-import { Badge, DueBadge, PixBox, ProductImage, Spinner } from './common';
+import { Badge, DueBadge, PhoneInput, PixBox, ProductImage, Spinner } from './common';
 
 export default function MyOrders({ config, session, onLogin, onSessionExpired }) {
   const remembered = loadBuyer();
@@ -95,7 +95,7 @@ export default function MyOrders({ config, session, onLogin, onSessionExpired })
           >
             <div>
               <label className="label">WhatsApp usado no claim</label>
-              <input required type="tel" inputMode="numeric" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="11988887777" className="input" />
+              <PhoneInput required value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="(11) 98888-7777" className="input" />
             </div>
             <div>
               <label className="label">Código de qualquer pedido seu</label>
@@ -329,7 +329,7 @@ function TransferRequest({ order, token, config, onChanged, onSessionExpired }) 
           </p>
           <input required minLength={2} value={to.name} onChange={(e) => setTo({ ...to, name: e.target.value })} placeholder="Nome de quem vai ficar" className="input" />
           <div className="grid grid-cols-2 gap-2">
-            <input required type="tel" inputMode="numeric" value={to.whatsapp} onChange={(e) => setTo({ ...to, whatsapp: e.target.value })} placeholder="WhatsApp dela" className="input" />
+            <PhoneInput required value={to.whatsapp} onChange={(e) => setTo({ ...to, whatsapp: e.target.value })} placeholder="WhatsApp dela" className="input" />
             <input value={to.contact} onChange={(e) => setTo({ ...to, contact: e.target.value })} placeholder="@ dela (opcional)" className="input" />
           </div>
           {error && <p className="text-xs text-rose-700 font-semibold">{error}</p>}

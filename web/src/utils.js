@@ -295,3 +295,21 @@ export const nameWithoutMembers = (name, group = 'BTS') => {
     });
   return rest.replace(/\s+(e|and|&)\s+/gi, ' ').replace(/[,;/+-]+/g, ' ').replace(/\s+/g, ' ').trim();
 };
+
+// ---- Telefone enquanto digita: 11988887777 → (11) 98888-7777
+export const phoneDigits = (v) => {
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.length > 11 && d.startsWith('55')) d = d.slice(2);
+  return d.slice(0, 11);
+};
+
+export const formatPhoneTyping = (v) => {
+  const d = phoneDigits(v);
+  if (!d) return '';
+  if (d.length <= 2) return `(${d}`;
+  const ddd = d.slice(0, 2);
+  const rest = d.slice(2);
+  if (rest.length <= 4) return `(${ddd}) ${rest}`;
+  if (d.length <= 10) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+  return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
+};

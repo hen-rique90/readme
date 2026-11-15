@@ -9,7 +9,7 @@ import {
   wholeGroupLabel,
   formatDay, formatDayShort, isAlbumLink, isOverdue, memberBadgeColor, orderStatusColor, splitInstallments, waLink
 } from '../utils';
-import { Badge, DateListInput, DueBadge, Modal, ProductImage, ProductTags, Spinner } from './common';
+import { Badge, DateListInput, DueBadge, Modal, PhoneInput, ProductImage, ProductTags, Spinner } from './common';
 import SaleTab from './SaleTab';
 import RemindersTab from './RemindersTab';
 import { EditBuyerModal, MergeBuyerModal, SameNamePanel } from './BuyerTools';
@@ -659,7 +659,7 @@ function TransferBox({ order, charges, run, onTransferred }) {
           </p>
           <input required minLength={2} value={to.name} onChange={(e) => setTo({ ...to, name: e.target.value })} placeholder="Nome de quem fica com o item" className="input" />
           <div className="grid grid-cols-2 gap-2">
-            <input type="tel" inputMode="numeric" value={to.whatsapp} onChange={(e) => setTo({ ...to, whatsapp: e.target.value })} placeholder="WhatsApp com DDD" className="input" />
+            <PhoneInput value={to.whatsapp} onChange={(e) => setTo({ ...to, whatsapp: e.target.value })} placeholder="WhatsApp com DDD" className="input" />
             <input value={to.contact} onChange={(e) => setTo({ ...to, contact: e.target.value })} placeholder="@ (opcional)" className="input" />
           </div>
           <button className="btn-primary w-full">Repassar pedido</button>

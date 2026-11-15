@@ -4,7 +4,7 @@ import {
   CATEGORIES, DEFAULT_GROUP, GROUPS, GROUP_NAMES, formatBRL, formatDay, formatPhone, groupOf, membersOf, sameFirstName,
   splitInstallments, todayKey, waLink, wholeGroupLabel
 } from '../utils';
-import { DateListInput, ProductImage, Spinner } from './common';
+import { DateListInput, PhoneInput, ProductImage, Spinner } from './common';
 
 const EMPTY = {
   name: '', contact: '', whatsapp: '',
@@ -98,7 +98,7 @@ export default function SaleTab({ data, run }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">WhatsApp com DDD</label>
-              <input type="tel" inputMode="numeric" value={form.whatsapp} onChange={set('whatsapp')} placeholder="11999998888" className="input" />
+              <PhoneInput value={form.whatsapp} onChange={set('whatsapp')} placeholder="(11) 99999-8888" className="input" />
             </div>
             <div>
               <label className="label">@ (Insta / Twitter)</label>
