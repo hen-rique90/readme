@@ -25,7 +25,7 @@ var HEADERS = {
   config: ['Chave', 'Valor', 'Descrição'],
   products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo', 'Prazo Pagamento', 'Datas Pix Parcelado', 'Frete', 'Condição', 'Grupo'],
   orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento', 'Obs. da compradora',
-    'Repasse: nome', 'Repasse: WhatsApp', 'Repasse: @', 'Histórico', 'Forma de pagamento'],
+    'Repasse: nome', 'Repasse: WhatsApp', 'Repasse: @', 'Histórico', 'Forma de pagamento', 'Foto'],
   charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento', 'Último lembrete'],
   clients: ['WhatsApp', 'Nome', '@ (Insta/Twitter)', 'Senha (protegida)', 'Sal', 'Criada em', 'Último acesso', 'Trocar senha']
 };
@@ -60,7 +60,7 @@ var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'no
 var ORDER_STATUSES = ['Reservado', 'Comprado', 'A caminho do Brasil', 'Chegou (na bag)', 'Enviado', 'Entregue', 'Cancelado'];
 var CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 var SHIPPING_OPTIONS = ['Guardar na bag', 'Enviar assim que chegar'];
-var SCHEMA_VERSION = '8';
+var SCHEMA_VERSION = '9';
 var PAYMENT_METHODS = ['Pix', 'Cartão de crédito'];
 var DEFAULT_GROUP = 'BTS'; // produtos antigos, sem grupo, eram todos de BTS
 var SHIPPING_COST_OPTIONS = ['Frete incluso', 'Frete não incluso'];
@@ -128,7 +128,8 @@ var ADMIN_ACTIONS = {
   adminUpdateBuyer: actionAdminUpdateBuyer_,
   adminDeleteAccount: actionAdminDeleteAccount_,
   adminUpdateCharge: actionAdminUpdateCharge_,
-  adminUpdateOrder: actionAdminUpdateOrder_
+  adminUpdateOrder: actionAdminUpdateOrder_,
+  adminSplitOrder: actionAdminSplitOrder_
 };
 
 // Ações que alteram a planilha e precisam da trava
@@ -138,7 +139,7 @@ var WRITE_ACTIONS = {
   register: true, login: true, updateProfile: true, changePassword: true, updateMyOrder: true, cancelMyOrder: true,
   adminResetPassword: true, adminCreateSale: true, adminTransferOrder: true, adminApproveTransfer: true,
   adminRejectTransfer: true, requestTransfer: true, cancelTransferRequest: true, adminMarkReminded: true,
-  adminUpdateBuyer: true, adminDeleteAccount: true, adminUpdateCharge: true, adminUpdateOrder: true
+  adminUpdateBuyer: true, adminDeleteAccount: true, adminUpdateCharge: true, adminUpdateOrder: true, adminSplitOrder: true
 };
 
 function handle_(action, params) {
@@ -450,14 +451,15 @@ function toOrder_(r) {
     transferWhatsapp: phone_(v[18]),
     transferContact: str_(v[19]),
     history: str_(v[20]),
-    paymentMethod: oneOf_(v[21], PAYMENT_METHODS) || 'Pix'
+    paymentMethod: oneOf_(v[21], PAYMENT_METHODS) || 'Pix',
+    image: str_(v[22])
   };
 }
 
 function orderRow_(o) {
   return [o.orderId, dateCell_(o.createdAt), o.productId, o.productName,
     o.member, o.batch, o.buyerName, o.contact, o.whatsapp, o.quantity, o.unitPrice, o.itemTotal, o.shipping, o.status, o.note,
-    o.payment || '', o.buyerNote || '', o.transferName || '', o.transferWhatsapp || '', o.transferContact || '', o.history || '', o.paymentMethod || 'Pix'];
+    o.payment || '', o.buyerNote || '', o.transferName || '', o.transferWhatsapp || '', o.transferContact || '', o.history || '', o.paymentMethod || 'Pix', o.image || ''];
 }
 
 function toCharge_(r) {
@@ -653,7 +655,7 @@ function actionMyOrders_(params) {
 
   var orders = mine.map(function (o) {
     var out = strip_(o);
-    out.image = products[o.productId] ? products[o.productId].image : '';
+    out.image = o.image || (products[o.productId] ? products[o.productId].image : '');
     out.charges = charges.filter(function (c) { return c.orderId === o.orderId; }).map(strip_);
     return out;
   }).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; });
@@ -884,7 +886,7 @@ function newCharge_(order, description, amount, existingIds, dueDate, paid) {
     amount: money_(amount),
     status: paid ? 'Pago' : 'Pendente',
     createdAt: new Date().toISOString(),
-    paidAt: paid ? new Date().toISOString() : '',
+    paidAt: paid ? (typeof paid === 'string' ? paid : new Date().toISOString()) : '',
     dueDate: dateKey_(dueDate)
   };
   existingIds[charge.chargeId] = true;
@@ -1776,6 +1778,10 @@ function actionAdminUpdateOrder_(params) {
   if (name !== order.productName) changes.push('produto: "' + order.productName + '" → "' + name + '"');
   if (quantity !== order.quantity) changes.push('quantidade: ' + order.quantity + ' → ' + quantity);
   if (unitPrice !== order.unitPrice) changes.push('valor unitário: ' + brl_(order.unitPrice) + ' → ' + brl_(unitPrice));
+  if (params.image !== undefined && str_(params.image) !== order.image) {
+    changes.push(str_(params.image) ? 'foto alterada' : 'foto removida');
+    order.image = str_(params.image).slice(0, 500);
+  }
   if (!changes.length) throw userError_('Nada mudou.');
 
   var oldTotal = order.itemTotal;
@@ -1800,4 +1806,93 @@ function actionAdminUpdateOrder_(params) {
   addHistory_(order, 'item corrigido — ' + changes.join('; '));
   writeRow_('orders', order.rowNumber, orderRow_(order));
   return { ok: true, order: strip_(order), adjustedCharge: adjusted ? strip_(adjusted) : null };
+}
+
+
+// ----------------------------------------------------------------------------
+// SEPARAR UM PEDIDO EM VÁRIOS (ex.: "Jin e Jimin — R$ 30" → Jin R$ 15 + Jimin R$ 15)
+// ----------------------------------------------------------------------------
+// O pedido original vira a 1ª parte (mantém o código); as outras viram pedidos
+// novos. Cada cobrança é dividida na mesma proporção, mantendo status e prazo.
+function actionAdminSplitOrder_(params) {
+  var order = findOrder_(params.orderId);
+  if (order.status === 'Cancelado') throw userError_('Esse pedido está cancelado.');
+  var parts = (params.parts || []).map(function (p) {
+    return {
+      productName: str_(p.productName).slice(0, 150),
+      member: str_(p.member).slice(0, 40) || order.member,
+      amount: money_(p.amount),
+      image: str_(p.image).slice(0, 500)
+    };
+  });
+  if (parts.length < 2) throw userError_('Informe pelo menos 2 partes.');
+  if (parts.length > 20) throw userError_('Máximo de 20 partes.');
+  parts.forEach(function (p) {
+    if (!p.productName) throw userError_('Dê um nome para cada parte.');
+    if (p.amount <= 0) throw userError_('Cada parte precisa de um valor maior que zero.');
+  });
+  var sum = money_(parts.reduce(function (a, p) { return a + p.amount; }, 0));
+  if (Math.abs(sum - order.itemTotal) > 0.01) {
+    throw userError_('A soma das partes (' + brl_(sum) + ') precisa ser igual ao valor do pedido (' + brl_(order.itemTotal) + ').');
+  }
+
+  var charges = orderCharges_(order).filter(function (c) { return c.status !== 'Cancelada'; });
+  var ids = {};
+  allOrders_().forEach(function (o) { ids[o.orderId] = true; });
+  var chargeIdsMap = chargeIds_();
+  var originalName = order.productName;
+  var created = [];
+
+  // valor de cada cobrança dividido por parte (a última acerta os centavos)
+  var shares = charges.map(function (c) {
+    var acc = 0;
+    return parts.map(function (p, i) {
+      var v = i === parts.length - 1 ? money_(c.amount - acc) : money_(c.amount * p.amount / order.itemTotal);
+      acc = money_(acc + v);
+      return v;
+    });
+  });
+
+  parts.forEach(function (p, i) {
+    if (i === 0) {
+      order.productName = p.productName;
+      order.member = p.member;
+      order.quantity = 1;
+      order.unitPrice = p.amount;
+      order.itemTotal = p.amount;
+      if (p.image) order.image = p.image;
+      addHistory_(order, 'separado de "' + originalName + '" (' + parts.length + ' partes)');
+      writeRow_('orders', order.rowNumber, orderRow_(order));
+      charges.forEach(function (c, k) {
+        c.amount = shares[k][0];
+        writeRow_('charges', c.rowNumber, chargeRow_(c));
+      });
+      created.push(strip_(order));
+      return;
+    }
+    var copy = {};
+    Object.keys(order).forEach(function (k) { if (k !== 'rowNumber') copy[k] = order[k]; });
+    copy.orderId = newId_('PED-', ids);
+    ids[copy.orderId] = true;
+    copy.createdAt = dateCell_(order.createdAt);
+    copy.productName = p.productName;
+    copy.member = p.member;
+    copy.quantity = 1;
+    copy.unitPrice = p.amount;
+    copy.itemTotal = p.amount;
+    copy.image = p.image || '';
+    copy.transferName = '';
+    copy.transferWhatsapp = '';
+    copy.transferContact = '';
+    copy.history = '';
+    addHistory_(copy, 'separado do pedido ' + order.orderId + ' ("' + originalName + '")');
+    appendRow_('orders', orderRow_(copy));
+    charges.forEach(function (c, k) {
+      // pago continua pago, com a mesma data
+      newCharge_(copy, c.description, shares[k][i], chargeIdsMap, c.dueDate, c.status === 'Pago' ? (c.paidAt || true) : false);
+    });
+    copy.createdAt = date_(copy.createdAt);
+    created.push(copy);
+  });
+  return { ok: true, orders: created };
 }

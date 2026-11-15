@@ -253,3 +253,45 @@ export const sameNameGroups = (orders, clients = []) => {
     .map(([key, list]) => ({ key: `${key}|${list.map((b) => b.whatsapp).sort().join(',')}`, name: list[0].name, buyers: list }))
     .sort((a, b) => a.name.localeCompare(b.name));
 };
+
+// ---- Descobrir os membros citados no nome de um item ("Jin e Jimin", "V,Yoongi e Nam")
+const BTS_ALIASES = {
+  RM: ['rm', 'nam', 'namjoon', 'namjoom', 'nan', 'namjun'],
+  Jin: ['jin', 'seokjin'],
+  Suga: ['suga', 'yoongi', 'yoongio', 'yoogi', 'agust', 'agust d'],
+  'J-Hope': ['j-hope', 'jhope', 'j hope', 'hope', 'j-hobe', 'hoseok'],
+  Jimin: ['jimin', 'jim'],
+  V: ['v', 'tae', 'taehyung'],
+  Jungkook: ['jungkook', 'jung kook', 'jk', 'kook']
+};
+
+const escapeRx = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export const detectMembers = (name, group = 'BTS') => {
+  const text = ` ${String(name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')} `;
+  const aliases = group === 'BTS' || !GROUPS[group]
+    ? BTS_ALIASES
+    : Object.fromEntries(GROUPS[group].map((m) => [m, [m.toLowerCase()]]));
+  const found = [];
+  Object.entries(aliases).forEach(([member, words]) => {
+    let first = -1;
+    words.forEach((w) => {
+      const m = new RegExp(`(^|[^a-z])${escapeRx(w)}(?=[^a-z]|$)`).exec(text);
+      if (m && (first === -1 || m.index < first)) first = m.index;
+    });
+    if (first !== -1) found.push([first, member]);
+  });
+  return found.sort((a, b) => a[0] - b[0]).map(([, m]) => m);
+};
+
+// O que sobra do nome sem os membros (ex.: "Yoongi e Jin Goyang LD" → "Goyang LD")
+export const nameWithoutMembers = (name, group = 'BTS') => {
+  const aliases = group === 'BTS' || !GROUPS[group] ? Object.values(BTS_ALIASES).flat() : GROUPS[group].map((m) => m.toLowerCase());
+  let rest = ` ${String(name || '')} `;
+  aliases
+    .sort((a, b) => b.length - a.length)
+    .forEach((w) => {
+      rest = rest.replace(new RegExp(`(^|[^A-Za-zÀ-ÿ])${escapeRx(w)}(?=[^A-Za-zÀ-ÿ]|$)`, 'gi'), '$1');
+    });
+  return rest.replace(/\s+(e|and|&)\s+/gi, ' ').replace(/[,;/+-]+/g, ' ').replace(/\s+/g, ' ').trim();
+};

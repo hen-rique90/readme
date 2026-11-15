@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
 import {
-  CATEGORIES, DEFAULT_GROUP, phoneConflicts, GROUPS, GROUP_NAMES, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone, groupOf, membersOf,
+  CATEGORIES, DEFAULT_GROUP, phoneConflicts, detectMembers, GROUPS, GROUP_NAMES, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone, groupOf, membersOf,
   wholeGroupLabel,
   formatDay, formatDayShort, isAlbumLink, isOverdue, memberBadgeColor, orderStatusColor, splitInstallments, waLink
 } from '../utils';
@@ -13,6 +13,7 @@ import { Badge, DateListInput, DueBadge, Modal, ProductImage, ProductTags, Spinn
 import SaleTab from './SaleTab';
 import RemindersTab from './RemindersTab';
 import { EditBuyerModal, MergeBuyerModal, SameNamePanel } from './BuyerTools';
+import { SplitOrderModal } from './OrderTools';
 
 const PASS_KEY = 'ceg_adm_senha';
 const CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
@@ -232,6 +233,11 @@ function OrdersTab({ data, run, initialQuery = '' }) {
   const [status, setStatus] = useState('');
   const [onlyOwing, setOnlyOwing] = useState(false);
   const [onlyTransfers, setOnlyTransfers] = useState(false);
+  const [onlyMulti, setOnlyMulti] = useState(false);
+  const productsById = useMemo(() => Object.fromEntries(data.products.map((p) => [p.id, p])), [data.products]);
+  const groupOfOrder = (o) => groupOf(productsById[o.productId] || {});
+  const isMulti = (o) => o.status !== 'Cancelado' && detectMembers(o.productName, groupOfOrder(o)).length >= 2;
+  const multiCount = data.orders.filter(isMulti).length;
   const [transferred, setTransferred] = useState(null); // aviso depois de repassar (o pedido pode sair do filtro)
   const pendingTransfers = data.orders.filter((o) => o.transferName || o.transferWhatsapp).length;
   const [expanded, setExpanded] = useState(null);
@@ -246,7 +252,8 @@ function OrdersTab({ data, run, initialQuery = '' }) {
       (!batch || o.batch === batch) &&
       (!status || o.status === status) &&
       (!onlyOwing || owed > 0) &&
-      (!(onlyTransfers && pendingTransfers > 0) || !!(o.transferName || o.transferWhatsapp))
+      (!(onlyTransfers && pendingTransfers > 0) || !!(o.transferName || o.transferWhatsapp)) &&
+      (!(onlyMulti && multiCount > 0) || isMulti(o))
     );
   });
 
@@ -270,6 +277,12 @@ function OrdersTab({ data, run, initialQuery = '' }) {
           <label className="flex items-center gap-2 text-xs font-bold text-fuchsia-700 bg-fuchsia-50 px-2.5 py-1.5 rounded-lg">
             <input type="checkbox" checked={onlyTransfers} onChange={(e) => setOnlyTransfers(e.target.checked)} className="w-4 h-4 accent-fuchsia-600" />
             🔁 Repasses aguardando ({pendingTransfers})
+          </label>
+        )}
+        {multiCount > 0 && (
+          <label className="flex items-center gap-2 text-xs font-bold text-sky-800 bg-sky-50 px-2.5 py-1.5 rounded-lg" title="Itens como 'Jin e Jimin' com o valor somado">
+            <input type="checkbox" checked={onlyMulti} onChange={(e) => setOnlyMulti(e.target.checked)} className="w-4 h-4 accent-sky-600" />
+            ✂️ Vários membros no mesmo pedido ({multiCount})
           </label>
         )}
       </div>
@@ -333,6 +346,9 @@ function OrdersTab({ data, run, initialQuery = '' }) {
                       <span className="text-xs text-purple-600 font-semibold">{o.contact}</span>
                     </td>
                     <td className="py-3 px-3">
+                      <div className="flex gap-2">
+                      <ProductImage src={o.image || productsById[o.productId]?.image} className="w-10 h-10 rounded-lg border border-purple-100 shrink-0" emojiSize="text-sm" />
+                      <div>
                       <span className="font-semibold text-slate-800">{o.quantity}x {o.productName}</span>
                       <span className="block text-[11px] text-slate-400">#{o.productId} • {o.batch} • {o.shipping}{o.payment ? ` • ${o.payment}` : ''}</span>
                       {o.paymentMethod === 'Cartão de crédito' && (
@@ -350,6 +366,8 @@ function OrdersTab({ data, run, initialQuery = '' }) {
                           🔁 Repasse para {o.transferName} — aguardando você
                         </span>
                       )}
+                      </div>
+                      </div>
                     </td>
                     <td className="py-3 px-3 whitespace-nowrap">
                       <span className="block text-emerald-700 font-bold">{formatBRL(paid)}</span>
@@ -378,7 +396,7 @@ function OrdersTab({ data, run, initialQuery = '' }) {
                   {isOpen && (
                     <tr className="bg-purple-50/40">
                       <td colSpan={7} className="p-4">
-                        <OrderDetails order={o} charges={charges} run={run} onTransferred={setTransferred} />
+                        <OrderDetails order={o} charges={charges} run={run} onTransferred={setTransferred} group={groupOfOrder(o)} productImage={productsById[o.productId]?.image} />
                       </td>
                     </tr>
                   )}
@@ -420,9 +438,9 @@ function EditCharge({ charge, run, onDone }) {
 }
 
 // Corrigir produto, quantidade e valor unitário do pedido
-function EditItem({ order, run }) {
+function EditItem({ order, run, productImage }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ productName: order.productName, quantity: order.quantity, unitPrice: order.unitPrice, adjustCharge: true });
+  const [form, setForm] = useState({ productName: order.productName, quantity: order.quantity, unitPrice: order.unitPrice, adjustCharge: true, image: order.image || '' });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const total = (Number(form.quantity) || 0) * (Number(form.unitPrice) || 0);
   if (!open) {
@@ -445,6 +463,11 @@ function EditItem({ order, run }) {
     >
       <h4 className="font-extrabold text-slate-800 text-sm">Editar item</h4>
       <input required value={form.productName} onChange={set('productName')} className="input py-1.5" aria-label="Produto" />
+      <div className="flex gap-2 items-center">
+        <input type="url" value={form.image} onChange={set('image')} placeholder="Link da foto (Drive ou Imgur)" className="input py-1.5" aria-label="Foto" />
+        <ProductImage src={form.image || productImage} className="w-10 h-10 rounded-lg border border-purple-100 shrink-0" emojiSize="text-sm" />
+      </div>
+      {!form.image && productImage && <p className="text-[11px] text-slate-400">Sem foto própria: usa a foto do produto do catálogo.</p>}
       <div className="grid grid-cols-3 gap-2 items-center">
         <input required type="number" min="1" value={form.quantity} onChange={set('quantity')} className="input py-1.5" aria-label="Quantidade" title="Quantidade" />
         <input required type="number" step="0.01" min="0.01" value={form.unitPrice} onChange={set('unitPrice')} className="input py-1.5" aria-label="Valor unitário" title="Valor unitário" />
@@ -462,7 +485,8 @@ function EditItem({ order, run }) {
   );
 }
 
-function OrderDetails({ order, charges, run, onTransferred }) {
+function OrderDetails({ order, charges, run, onTransferred, group, productImage }) {
+  const [splitting, setSplitting] = useState(false);
   const [desc, setDesc] = useState('Frete internacional');
   const [amount, setAmount] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -471,7 +495,15 @@ function OrderDetails({ order, charges, run, onTransferred }) {
   return (
     <div className="grid lg:grid-cols-2 gap-4">
       <div className="space-y-2">
-        <EditItem order={order} run={run} />
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          <EditItem order={order} run={run} productImage={productImage} />
+          {order.status !== 'Cancelado' && (
+            <button type="button" onClick={() => setSplitting(true)} className="text-xs font-bold text-sky-700 hover:underline">
+              ✂️ Separar por membro{detectMembers(order.productName, group).length >= 2 ? ` (${detectMembers(order.productName, group).join(', ')})` : ''}
+            </button>
+          )}
+        </div>
+        {splitting && <SplitOrderModal order={order} group={group} run={run} onClose={() => setSplitting(false)} />}
         <h4 className="font-extrabold text-slate-800 text-sm">Cobranças deste pedido</h4>
         {charges.length === 0 && <p className="text-xs text-slate-400">Nenhuma cobrança.</p>}
         {charges.map((c) => editingCharge === c.chargeId ? (
