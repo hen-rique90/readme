@@ -159,3 +159,73 @@ test('claims fechados e limite por claim', () => {
   assert.equal(res.ok, false);
   assert.match(res.error, /fechados/);
 });
+
+test('prazo à vista: a cobrança do claim nasce com o vencimento do produto', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { dueDate: '2026-12-15', totalStock: 5 });
+  const res = api.call('claim', { ...buyer, productId: p.id, quantity: 2 });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(res.order.payment, 'Pix à vista');
+  assert.equal(res.charges.length, 1);
+  assert.equal(res.charges[0].dueDate, '2026-12-15');
+  assert.equal(res.charges[0].amount, 190);
+  const mine = api.call('myOrders', { whatsapp: buyer.whatsapp, code: res.order.orderId });
+  assert.equal(mine.orders[0].charges[0].dueDate, '2026-12-15');
+  assert.equal(mine.orders[0].payment, 'Pix à vista');
+});
+
+test('Pix parcelado: uma cobrança por data, somando o total exato', () => {
+  const { api, admin, gas } = freshBackend();
+  const p = addProduct(admin, {
+    price: 100, totalStock: 5, dueDate: '2026-12-15',
+    installmentDates: ['2027-02-15', '2026-12-15', '2027-01-15', '2027-01-15']
+  });
+  const saved = api.call('catalog').products[0];
+  assert.deepEqual(saved.installmentDates, ['2026-12-15', '2027-01-15', '2027-02-15']);
+  assert.equal(gas.state.sheets['Produtos'][1][10], '15/12/2026; 15/01/2027; 15/02/2027');
+
+  const res = api.call('claim', { ...buyer, productId: p.id, quantity: 1, paymentPlan: 'parcelado' });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(res.order.payment, 'Pix parcelado 3x');
+  assert.deepEqual(res.charges.map((c) => c.amount), [33.33, 33.33, 33.34]);
+  assert.deepEqual(res.charges.map((c) => c.dueDate), ['2026-12-15', '2027-01-15', '2027-02-15']);
+
+  // sem parcelas cadastradas, "parcelado" vira à vista
+  const p2 = addProduct(admin, { name: 'Outro', totalStock: 2 });
+  const res2 = api.call('claim', { ...buyer, productId: p2.id, quantity: 1, paymentPlan: 'parcelado' });
+  assert.equal(res2.charges.length, 1);
+  assert.equal(res2.order.payment, 'Pix à vista');
+});
+
+test('Pix parcelado exige pelo menos 2 datas', () => {
+  const { admin } = freshBackend();
+  const res = admin('saveProduct', { product: { isNew: true, name: 'X', price: 10, totalStock: 1, installmentDates: ['2026-12-15'] } });
+  assert.equal(res.ok, false);
+});
+
+test('cobrança avulsa e em lote aceitam vencimento', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3 });
+  const { order } = api.call('claim', { ...buyer, productId: p.id, quantity: 1 });
+  assert.equal(admin('addCharge', { orderId: order.orderId, description: 'Frete nacional', amount: 20, dueDate: '2027-01-10' }).charge.dueDate, '2027-01-10');
+  admin('addBatchCharge', { batch: 'CEG #1', description: 'Frete internacional', amountPerUnit: 10, dueDate: '2027-01-20' });
+  const mine = api.call('myOrders', { whatsapp: buyer.whatsapp, code: order.orderId });
+  assert.deepEqual(mine.orders[0].charges.map((c) => c.dueDate).sort(), ['', '2027-01-10', '2027-01-20']);
+});
+
+test('planilha antiga ganha as colunas novas sem perder dados', () => {
+  const gas = createFakeGas();
+  const api = loadBackend(CODE, gas);
+  // simula a planilha criada pela versão anterior (sem as colunas novas)
+  gas.state.sheets['Config'] = [['Chave', 'Valor', 'Descrição'], ['adminPassword', PASSWORD, ''], ['claimsOpen', 'SIM', '']];
+  gas.state.sheets['Produtos'] = [['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo'],
+    ['CEG-01', 'Antigo', 'V', 'Photocards', 50, 3, '', 'CEG #1', 'SIM']];
+  gas.state.sheets['Pedidos'] = [['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação']];
+  gas.state.sheets['Cobranças'] = [['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em']];
+  const cat = api.call('catalog');
+  assert.equal(cat.products[0].name, 'Antigo');
+  assert.equal(gas.state.sheets['Produtos'][0][10], 'Datas Pix Parcelado');
+  assert.equal(gas.state.sheets['Pedidos'][0][15], 'Pagamento');
+  assert.equal(gas.state.sheets['Cobranças'][0][8], 'Vencimento');
+  assert.equal(api.call('claim', { ...buyer, productId: 'CEG-01', quantity: 1 }).ok, true);
+});

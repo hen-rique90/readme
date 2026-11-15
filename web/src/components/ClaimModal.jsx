@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CheckCircle2, Phone, ReceiptText } from 'lucide-react';
 import { api } from '../api';
-import { formatBRL, loadBuyer, saveBuyer, waLink } from '../utils';
+import { formatBRL, formatDay, formatDayShort, loadBuyer, saveBuyer, splitInstallments, waLink } from '../utils';
 import { CopyButton, Modal, PixBox, ProductImage, Spinner } from './common';
 
 export default function ClaimModal({ product, config, onClose, onClaimed, onViewOrders, showToast }) {
@@ -11,7 +11,8 @@ export default function ClaimModal({ product, config, onClose, onClaimed, onView
     contact: remembered.contact || '',
     whatsapp: remembered.whatsapp || '',
     quantity: 1,
-    shipping: remembered.shipping || config.shippingOptions?.[0] || 'Guardar na bag'
+    shipping: remembered.shipping || config.shippingOptions?.[0] || 'Guardar na bag',
+    paymentPlan: 'avista'
   });
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
@@ -42,13 +43,24 @@ export default function ClaimModal({ product, config, onClose, onClaimed, onView
     }
   };
 
+  const installments = product.installmentDates || [];
+  const canSplit = installments.length >= 2;
+  const total = product.price * Number(form.quantity);
+  const parts = splitInstallments(total, installments.length);
+
   if (result) {
     const { order } = result;
+    const charges = result.charges || [result.charge];
+    const first = charges[0];
+    const schedule = charges
+      .map((c) => `• ${c.description}: ${formatBRL(c.amount)}${c.dueDate ? ` até ${formatDay(c.dueDate)}` : ''}`)
+      .join('\n');
     const message =
       `Oii! 💜 Acabei de fazer um claim na CEG!\n\n` +
       `*Pedido:* ${order.orderId}\n*Item:* ${order.quantity}x ${order.productName} (#${order.productId})\n` +
-      `*Valor:* ${formatBRL(order.itemTotal)}\n*Nome:* ${order.buyerName} (${order.contact})\n*Envio:* ${order.shipping}\n\n` +
-      `Segue meu comprovante do Pix:`;
+      `*Valor:* ${formatBRL(order.itemTotal)} (${order.payment || 'Pix à vista'})\n*Nome:* ${order.buyerName} (${order.contact})\n*Envio:* ${order.shipping}\n\n` +
+      (charges.length > 1 ? `*Parcelas:*\n${schedule}\n\n` : '') +
+      `Segue meu comprovante do Pix de ${formatBRL(first.amount)}:`;
     return (
       <Modal onClose={onClose}>
         <div className="text-center space-y-4">
@@ -74,10 +86,24 @@ export default function ClaimModal({ product, config, onClose, onClaimed, onView
           <div className="bg-slate-50 p-4 rounded-2xl text-left text-xs space-y-1.5 border border-slate-100">
             <Row label="Item" value={`${order.quantity}x ${order.productName}`} />
             <Row label="Envio" value={order.shipping} />
-            <div className="flex justify-between text-sm pt-1.5 border-t border-slate-200">
-              <span className="font-bold text-purple-900">Valor a pagar agora:</span>
-              <span className="font-black text-purple-900">{formatBRL(order.itemTotal)}</span>
-            </div>
+            <Row label="Pagamento" value={order.payment || 'Pix à vista'} />
+            {charges.length > 1 ? (
+              <div className="pt-1.5 border-t border-slate-200 space-y-1">
+                {charges.map((c, i) => (
+                  <div key={c.chargeId} className={`flex justify-between ${i === 0 ? 'text-sm font-black text-purple-900' : 'text-slate-600'}`}>
+                    <span>Parcela {i + 1}{c.dueDate ? ` — até ${formatDay(c.dueDate)}` : ''}</span>
+                    <span>{formatBRL(c.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex justify-between text-sm pt-1.5 border-t border-slate-200">
+                <span className="font-bold text-purple-900">
+                  Valor a pagar{first.dueDate ? ` até ${formatDay(first.dueDate)}` : ' agora'}:
+                </span>
+                <span className="font-black text-purple-900">{formatBRL(order.itemTotal)}</span>
+              </div>
+            )}
           </div>
 
           <PixBox config={config} />
@@ -155,6 +181,32 @@ export default function ClaimModal({ product, config, onClose, onClaimed, onView
           </div>
         </div>
         <div>
+          <label className="label">Pagamento</label>
+          {canSplit ? (
+            <div className="space-y-2">
+              <PlanOption
+                checked={form.paymentPlan === 'avista'}
+                onChange={() => setForm({ ...form, paymentPlan: 'avista' })}
+                title={`Pix à vista — ${formatBRL(total)}`}
+                detail={product.dueDate ? `Pagar até ${formatDay(product.dueDate)}` : 'Pagar após o claim'}
+              />
+              <PlanOption
+                checked={form.paymentPlan === 'parcelado'}
+                onChange={() => setForm({ ...form, paymentPlan: 'parcelado' })}
+                title={`Pix parcelado — ${installments.length}x de ${formatBRL(parts[0])}`}
+                detail={installments.map((d, i) => `${formatDayShort(d)} (${formatBRL(parts[i])})`).join(' • ')}
+              />
+            </div>
+          ) : (
+            <div className="px-3.5 py-2.5 rounded-xl bg-purple-50 text-sm">
+              <span className="font-bold text-slate-800">Pix à vista — {formatBRL(total)}</span>
+              <span className="block text-[11px] text-slate-500">
+                {product.dueDate ? `Pagar até ${formatDay(product.dueDate)}` : 'Pagar após o claim'}
+              </span>
+            </div>
+          )}
+        </div>
+        <div>
           <label className="label">Envio</label>
           <select value={form.shipping} onChange={set('shipping')} className="input">
             {(config.shippingOptions || ['Guardar na bag']).map((o) => (
@@ -184,5 +236,21 @@ function Row({ label, value }) {
       <span className="text-slate-500">{label}:</span>
       <span className="font-bold text-slate-800 text-right">{value}</span>
     </div>
+  );
+}
+
+function PlanOption({ checked, onChange, title, detail }) {
+  return (
+    <label
+      className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+        checked ? 'border-purple-500 bg-purple-50' : 'border-purple-100 hover:border-purple-300'
+      }`}
+    >
+      <input type="radio" checked={checked} onChange={onChange} className="mt-1 accent-purple-600" />
+      <span>
+        <span className="block text-sm font-bold text-slate-800">{title}</span>
+        <span className="block text-[11px] text-slate-500">{detail}</span>
+      </span>
+    </label>
   );
 }

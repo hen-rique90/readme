@@ -116,3 +116,25 @@ export const imageCandidates = (raw) => {
 };
 
 export const isAlbumLink = (raw) => /imgur\.com\/(a|gallery)\//i.test(String(raw || ''));
+
+// Datas de vencimento chegam como 'aaaa-mm-dd'
+export const formatDay = (key) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key || '');
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+};
+
+export const formatDayShort = (key) => formatDay(key).slice(0, 5);
+
+export const todayKey = () =>
+  new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }); // aaaa-mm-dd
+
+export const isOverdue = (charge) => charge.status === 'Pendente' && !!charge.dueDate && charge.dueDate < todayKey();
+
+// Mesma divisão do servidor: parcelas iguais, a última acerta os centavos
+export const splitInstallments = (total, n) => {
+  if (n < 2) return [total];
+  const each = Math.floor((total / n) * 100) / 100;
+  const parts = Array(n - 1).fill(each);
+  parts.push(Math.round((total - each * (n - 1)) * 100) / 100);
+  return parts;
+};
