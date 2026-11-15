@@ -47,6 +47,7 @@ export default function Admin({ showToast, onCatalogChange }) {
     try {
       const res = await api('adminData', { password: pass });
       setData(res);
+      if (res.unifiedByPhone) showToast(`💜 ${res.unifiedByPhone} pedido(s) com o mesmo WhatsApp foram juntados no mesmo nome (veja o Histórico de cada pedido).`);
       return true;
     } catch (err) {
       if (!silent || err.authError) showToast(err.message, 'error');

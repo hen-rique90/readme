@@ -971,3 +971,55 @@ test('fotos: ADM envia foto do celular para a pasta do Drive', () => {
   const r2 = up();
   assert.equal(gas.files[r2.fileId].folder, file.folder);
 });
+
+test('mesmo WhatsApp: junta sozinho no mesmo nome (conta > mais pedidos > mais recente)', () => {
+  const { api, admin, gas } = freshBackend();
+  const id = addProduct(admin, { totalStock: 10 }).id;
+  const claim = (name, contact, whatsapp) => api.call('claim', { productId: id, quantity: 1, buyerName: name, contact, whatsapp });
+  // pedidos antigos com nomes diferentes no mesmo número (como na importação)
+  const rows = gas.state.sheets['Pedidos'];
+  claim('Mariana Silva', '@mari', '11988887777');
+  claim('Mariana Silva', '@mari', '11988887777');
+  claim('Mariana Silva', '@mari', '11988887777');
+  claim('Bia', '@bia', '21977776666');
+  rows[3][6] = 'Mari'; // nome errado digitado direto na planilha
+  rows[1][7] = '@mari_antigo';
+
+  // claim novo sem conta com nome diferente: usa o nome já conhecido
+  const c = claim('Mah', '@mah', '(11) 98888-7777');
+  assert.equal(c.order.buyerName, 'Mariana Silva');
+  assert.equal(c.nameFromPhone, 'Mariana Silva');
+  assert.equal(claim('Beatriz', '@bia', '21977776666').order.buyerName, 'Bia'); // empate 1x0: fica o que já existia
+
+  // abrir o painel junta o que já estava na planilha
+  const data = admin('adminData');
+  assert.ok(data.unifiedByPhone >= 1);
+  const mari = data.orders.filter((o) => o.whatsapp === '11988887777');
+  assert.equal(mari.length, 4);
+  assert.ok(mari.every((o) => o.buyerName === 'Mariana Silva'));
+  assert.ok(mari.some((o) => /nome unificado pelo WhatsApp: "Mari" → "Mariana Silva"/.test(o.history)));
+  assert.equal(admin('adminData').unifiedByPhone, 0); // já está tudo junto
+
+  // com conta, o nome da conta vence
+  api.call('register', { name: 'Mariana S. Oliveira', contact: '@mari_oficial', whatsapp: '11988887777', password: '123456', code: c.order.orderId });
+  const after = admin('adminData');
+  assert.equal(after.unifiedByPhone, 4);
+  assert.ok(after.orders.filter((o) => o.whatsapp === '11988887777').every((o) => o.buyerName === 'Mariana S. Oliveira' && o.contact === '@mari_oficial'));
+  // telefones diferentes não são juntados
+  assert.ok(after.orders.some((o) => o.buyerName === 'Bia'));
+});
+
+test('mesmo WhatsApp: nome corrigido pela ADM vale para todos os pedidos do número', () => {
+  const { api, admin } = freshBackend();
+  const id = addProduct(admin, { totalStock: 10 }).id;
+  const a = api.call('claim', { productId: id, quantity: 1, buyerName: 'Kay_Army', contact: '@kay', whatsapp: '94984192730' });
+  api.call('claim', { productId: id, quantity: 1, buyerName: 'Kay_Army', contact: '@kay', whatsapp: '94984192730' });
+  assert.equal(admin('adminTransferOrder', { orderId: a.order.orderId, name: 'Kai Souza', contact: '@kay', whatsapp: '94984192730' }).ok, true);
+  const data = admin('adminData');
+  assert.equal(data.unifiedByPhone, 0); // não desfaz a correção
+  assert.ok(data.orders.filter((o) => o.whatsapp === '94984192730').every((o) => o.buyerName === 'Kai Souza'));
+  // venda registrada com outro nome no mesmo número entra no nome certo
+  const sale = admin('adminCreateSale', { buyer: { name: 'Kai', whatsapp: '(94) 98419-2730' }, productId: id, unitPrice: 50, payment: { mode: 'avista', paid: false } });
+  assert.equal(sale.ok, true, sale.error);
+  assert.equal(admin('adminData').orders.find((o) => o.orderId === sale.order.orderId).buyerName, 'Kai Souza');
+});

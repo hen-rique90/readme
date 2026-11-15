@@ -47,6 +47,13 @@ Ferramenta para anunciar os produtos da CEG. A compradora faz o claim e o item f
 - **ADM → Envios:** endereço para copiar, itens, pacote, frete pago ou não; informar o valor quando não houve cotação automática; marcar **Enviado** com o rastreio (os itens viram "Enviado") e avisar a cliente no WhatsApp.
 - **Configuração:** ADM → Configurações → Frete: CEP de origem, e-mail técnico e os **tokens** do Melhor Envio e do SuperFrete (guardados em segredo nas Propriedades do script — nunca na planilha nem no site).
 
+## Mesmo WhatsApp = mesma compradora
+- Pedidos com o **mesmo DDD + número** ficam sempre no mesmo nome, **sem precisar confirmar**.
+- Qual nome vale: o da **conta** (se ela tiver conta); sem conta, o nome que aparece em **mais pedidos** (empate: o mais recente). O @ segue a mesma regra.
+- Acontece sozinho: no claim, em "Registrar venda", em repasses e toda vez que o painel ADM abre (o que corrige também o que foi importado ou digitado direto na planilha). Cada pedido alterado ganha uma linha no **Histórico**.
+- Para trocar o nome de alguém, use ADM → Compradoras → ✏️ Corrigir (ou "Repassar / corrigir compradora" no pedido): o nome digitado pela ADM passa a valer para todos os pedidos daquele WhatsApp.
+- Mesmo nome com WhatsApp diferente **não** é juntado sozinho (pode ser outra pessoa).
+
 ## Fotos enviadas do celular
 - Em todo campo de foto do painel (pedido já feito → "Editar item", produto, foto por membro, "Registrar venda" e "Separar por membro") há o botão **📷 Enviar foto**: escolha a foto no celular/computador e o link é preenchido sozinho.
 - A foto é reduzida no aparelho (até 1200 px) e salva na pasta **"CEG Fotos"** do seu Google Drive, compartilhada como "qualquer pessoa com o link pode ver".

@@ -130,6 +130,12 @@ export default function ClaimModal({
             )}
           </div>
 
+          {result.nameFromPhone && (
+            <p className="p-3 rounded-xl bg-purple-50 border border-purple-200 text-xs text-purple-900">
+              💜 Esse WhatsApp já tem pedidos com a gente, então este também ficou no nome de <strong>{result.nameFromPhone}</strong>.
+            </p>
+          )}
+
           {session && (
             <AfterClaim
               order={order}
