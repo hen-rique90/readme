@@ -129,6 +129,7 @@ export default function MyOrders({ config, session, onLogin, onSessionExpired })
     .flatMap((o) => o.charges.filter((c) => c.status === 'Pendente').map((c) => ({ ...c, order: o })))
     .sort((a, b) => (a.dueDate || '9999') < (b.dueDate || '9999') ? -1 : 1);
   const overdue = pendingCharges.filter(isOverdue);
+  const cardPending = pendingCharges.filter((c) => c.order.paymentMethod === 'Cartão de crédito');
   const pixMessage =
     `Oii! 💜 Sou ${buyer.name} (${buyer.contact}).\nSegue o comprovante do Pix de ${formatBRL(totals.owed)} referente a:\n` +
     pendingCharges.map((c) => `• ${c.order.orderId} — ${c.description} (${formatBRL(c.amount)})${c.dueDate ? ` até ${formatDay(c.dueDate)}` : ''}`).join('\n');
@@ -180,15 +181,29 @@ export default function MyOrders({ config, session, onLogin, onSessionExpired })
               </li>
             ))}
           </ul>
-          <PixBox config={config || data.config} />
-          {(config || data.config)?.adminWhatsapp && (
+          {pendingCharges.some((c) => c.order.paymentMethod !== 'Cartão de crédito') && <PixBox config={config || data.config} />}
+          {cardPending.length > 0 && (config || data.config)?.adminWhatsapp && (
+            <a
+              href={waLink(
+                (config || data.config).adminWhatsapp,
+                `Oii! 💜 Sou ${buyer.name}. Escolhi pagar no cartão e ainda preciso do link para:\n` +
+                  cardPending.map((c) => `• ${c.order.orderId} — ${c.order.quantity}x ${c.order.productName} (${formatBRL(c.amount)})`).join('\n')
+              )}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-sm flex items-center justify-center gap-2"
+            >
+              💳 Pedir o link do cartão ({formatBRL(cardPending.reduce((a, c) => a + c.amount, 0))})
+            </a>
+          )}
+          {(config || data.config)?.adminWhatsapp && pendingCharges.length > cardPending.length && (
             <a
               href={waLink((config || data.config).adminWhatsapp, pixMessage)}
               target="_blank"
               rel="noreferrer"
               className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2"
             >
-              <Phone className="w-4 h-4" /> Enviar comprovante de {formatBRL(totals.owed)}
+              <Phone className="w-4 h-4" /> Enviar comprovante do Pix
             </a>
           )}
           <p className="text-[11px] text-slate-400">O status muda para "Pago" assim que a ADM confirmar o comprovante.</p>
@@ -214,7 +229,7 @@ export default function MyOrders({ config, session, onLogin, onSessionExpired })
                   {o.quantity}x {o.productName}
                 </h4>
                 <p className="text-xs text-slate-500">
-                  {o.batch} • {o.shipping}{o.payment ? ` • ${o.payment}` : ''}
+                  {o.batch} • {o.shipping}{o.payment ? ` • ${o.payment}` : ''}{o.paymentMethod === 'Cartão de crédito' ? ' 💳' : ''}
                   {o.note ? ` • Obs: ${o.note}` : ''}
                 </p>
                 {o.buyerNote && <p className="text-xs text-slate-500 mt-0.5">💬 Sua observação: {o.buyerNote}</p>}

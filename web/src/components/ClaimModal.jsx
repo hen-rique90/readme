@@ -15,6 +15,7 @@ export default function ClaimModal({
     quantity: 1,
     shipping: remembered.shipping || config.shippingOptions?.[0] || 'Guardar na bag',
     paymentPlan: 'avista',
+    paymentMethod: 'Pix',
     buyerNote: ''
   });
   const [sending, setSending] = useState(false);
@@ -51,7 +52,8 @@ export default function ClaimModal({
   };
 
   const installments = product.installmentDates || [];
-  const canSplit = installments.length >= 2;
+  const isCard = form.paymentMethod === 'Cartão de crédito';
+  const canSplit = installments.length >= 2 && !isCard;
   const total = product.price * Number(form.quantity);
   const parts = splitInstallments(total, installments.length);
 
@@ -59,6 +61,7 @@ export default function ClaimModal({
     const { order } = result;
     const charges = result.charges || [result.charge];
     const first = charges[0];
+    const card = order.paymentMethod === 'Cartão de crédito';
     const schedule = charges
       .map((c) => `• ${c.description}: ${formatBRL(c.amount)}${c.dueDate ? ` até ${formatDay(c.dueDate)}` : ''}`)
       .join('\n');
@@ -68,8 +71,9 @@ export default function ClaimModal({
       `*Valor:* ${formatBRL(order.itemTotal)} (${order.payment || 'Pix à vista'})\n*Nome:* ${order.buyerName} (${order.contact})\n*Envio:* ${order.shipping}\n` +
       (order.buyerNote ? `*Observação:* ${order.buyerNote}\n` : '') +
       `\n` +
+      `*Forma de pagamento:* ${card ? 'Cartão de crédito 💳' : 'Pix'}\n\n` +
       (charges.length > 1 ? `*Parcelas:*\n${schedule}\n\n` : '') +
-      `Segue meu comprovante do Pix de ${formatBRL(first.amount)}:`;
+      (card ? 'Escolhi pagar no cartão. Pode me mandar o link de pagamento, por favor? 💜' : `Segue meu comprovante do Pix de ${formatBRL(first.amount)}:`);
     return (
       <Modal onClose={onClose}>
         <div className="text-center space-y-4">
@@ -78,7 +82,11 @@ export default function ClaimModal({
           </div>
           <div>
             <h3 className="text-xl font-extrabold text-slate-800">Item reservado para você! 💜</h3>
-            <p className="text-xs text-slate-500 mt-1">Agora é só fazer o Pix e mandar o comprovante no WhatsApp.</p>
+            <p className="text-xs text-slate-500 mt-1">
+              {card
+                ? 'Você escolheu cartão: avise a loja no WhatsApp para receber o link de pagamento.'
+                : 'Agora é só fazer o Pix e mandar o comprovante no WhatsApp.'}
+            </p>
           </div>
 
           {session ? (
@@ -125,6 +133,8 @@ export default function ClaimModal({
           {session && (
             <AfterClaim
               order={order}
+              config={config}
+              charges={charges}
               session={session}
               onOrder={(o) => setResult({ ...result, order: { ...order, ...o } })}
               onUndone={() => {
@@ -137,7 +147,7 @@ export default function ClaimModal({
             />
           )}
 
-          <PixBox config={config} />
+          {!card && <PixBox config={config} />}
 
           {config.adminWhatsapp && (
             <a
@@ -146,7 +156,7 @@ export default function ClaimModal({
               rel="noreferrer"
               className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2"
             >
-              <Phone className="w-4 h-4" /> Enviar comprovante no WhatsApp
+              <Phone className="w-4 h-4" /> {card ? 'Pedir o link do cartão no WhatsApp' : 'Enviar comprovante no WhatsApp'}
             </a>
           )}
           <button onClick={onViewOrders} className="w-full btn-soft py-3 text-sm">
@@ -223,9 +233,33 @@ export default function ClaimModal({
             </div>
           </div>
         </div>
+        {config.acceptCard && (
+          <div>
+            <label className="label">Forma de pagamento</label>
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-purple-50">
+              {['Pix', 'Cartão de crédito'].map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setForm({ ...form, paymentMethod: m, paymentPlan: m === 'Pix' ? form.paymentPlan : 'avista' })}
+                  className={`py-2 rounded-lg text-sm font-bold ${form.paymentMethod === m ? 'bg-white text-purple-800 shadow-sm' : 'text-purple-700'}`}
+                >
+                  {m === 'Pix' ? 'Pix' : '💳 Cartão de crédito'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div>
           <label className="label">Pagamento</label>
-          {canSplit ? (
+          {isCard ? (
+            <div className="px-3.5 py-2.5 rounded-xl bg-indigo-50 text-sm">
+              <span className="font-bold text-slate-800">Cartão de crédito — {formatBRL(total)}</span>
+              <span className="block text-[11px] text-slate-500">
+                A loja te manda o link de pagamento pelo WhatsApp (pode ter taxa da maquininha). O site não pede dados do cartão.
+              </span>
+            </div>
+          ) : canSplit ? (
             <div className="space-y-2">
               <PlanOption
                 checked={form.paymentPlan === 'avista'}
@@ -315,7 +349,7 @@ function PlanOption({ checked, onChange, title, detail }) {
 }
 
 // Logo depois do claim (com conta): ajustar a observação ou desfazer um toque sem querer
-function AfterClaim({ order, session, onOrder, onUndone, onSessionExpired, showToast }) {
+function AfterClaim({ order, config, charges, session, onOrder, onUndone, onSessionExpired, showToast }) {
   const [note, setNote] = useState(order.buyerNote || '');
   const [busy, setBusy] = useState('');
 
@@ -332,8 +366,32 @@ function AfterClaim({ order, session, onOrder, onUndone, onSessionExpired, showT
     }
   };
 
+  const canSwitch = config.acceptCard && order.status === 'Reservado' && charges.length === 1;
+  const card = order.paymentMethod === 'Cartão de crédito';
+
   return (
     <div className="text-left space-y-2">
+      {canSwitch && (
+        <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-slate-50 text-xs">
+          <span>
+            Forma de pagamento: <strong>{card ? '💳 Cartão de crédito' : 'Pix'}</strong>
+          </span>
+          <button
+            type="button"
+            disabled={!!busy}
+            onClick={async () => {
+              const res = await call('method', 'updateMyOrder', { paymentMethod: card ? 'Pix' : 'Cartão de crédito' });
+              if (res) {
+                onOrder(res.order);
+                showToast(card ? 'Forma de pagamento: Pix' : 'Forma de pagamento: cartão de crédito');
+              }
+            }}
+            className="btn-soft py-1.5"
+          >
+            {busy === 'method' ? <Spinner className="w-3.5 h-3.5" /> : card ? 'Trocar para Pix' : 'Prefiro cartão'}
+          </button>
+        </div>
+      )}
       <label className="label">Observações (opcional)</label>
       <div className="flex gap-2">
         <input

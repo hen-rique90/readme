@@ -25,8 +25,8 @@ var HEADERS = {
   config: ['Chave', 'Valor', 'Descrição'],
   products: ['ID', 'Nome do Produto', 'Membro', 'Categoria', 'Preço (R$)', 'Estoque Total', 'Foto URL', 'Lote CEG', 'Ativo', 'Prazo Pagamento', 'Datas Pix Parcelado', 'Frete', 'Condição', 'Grupo'],
   orders: ['ID Pedido', 'Data', 'ID Produto', 'Produto', 'Membro', 'Lote', 'Nome', '@ (Insta/Twitter)', 'WhatsApp', 'Qtd', 'Preço Unit. (R$)', 'Total Item (R$)', 'Envio', 'Status', 'Observação', 'Pagamento', 'Obs. da compradora',
-    'Repasse: nome', 'Repasse: WhatsApp', 'Repasse: @', 'Histórico'],
-  charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento'],
+    'Repasse: nome', 'Repasse: WhatsApp', 'Repasse: @', 'Histórico', 'Forma de pagamento'],
+  charges: ['ID Cobrança', 'ID Pedido', 'WhatsApp', 'Descrição', 'Valor (R$)', 'Status', 'Criada em', 'Paga em', 'Vencimento', 'Último lembrete'],
   clients: ['WhatsApp', 'Nome', '@ (Insta/Twitter)', 'Senha (protegida)', 'Sal', 'Criada em', 'Último acesso', 'Trocar senha']
 };
 
@@ -48,16 +48,20 @@ var DEFAULT_CONFIG = [
   ['claimsOpen', 'SIM', 'SIM = claims abertos | NÃO = só visualização'],
   ['maxPerClaim', '5', 'Quantidade máxima de unidades por claim'],
   ['requireLogin', 'SIM', 'SIM = a compradora precisa ter conta para fazer claim'],
+  ['acceptCard', 'SIM', 'SIM = a compradora pode escolher cartão de crédito (a loja envia o link)'],
+  ['reminderEmail', '', 'E-mail que recebe o resumo diário de cobranças'],
+  ['reminderDaysBefore', '2', 'Quantos dias antes do vencimento entra o lembrete'],
   ['adminPassword', 'TROQUE-ESTA-SENHA', 'Senha do Painel ADM (nunca é enviada ao site)']
 ];
 
 var DEFAULT_PASSWORD = 'TROQUE-ESTA-SENHA';
-var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'noticeBanner', 'claimsOpen', 'maxPerClaim', 'requireLogin'];
+var PUBLIC_CONFIG_KEYS = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'noticeBanner', 'claimsOpen', 'maxPerClaim', 'requireLogin', 'acceptCard'];
 
 var ORDER_STATUSES = ['Reservado', 'Comprado', 'A caminho do Brasil', 'Chegou (na bag)', 'Enviado', 'Entregue', 'Cancelado'];
 var CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 var SHIPPING_OPTIONS = ['Guardar na bag', 'Enviar assim que chegar'];
-var SCHEMA_VERSION = '7';
+var SCHEMA_VERSION = '8';
+var PAYMENT_METHODS = ['Pix', 'Cartão de crédito'];
 var DEFAULT_GROUP = 'BTS'; // produtos antigos, sem grupo, eram todos de BTS
 var SHIPPING_COST_OPTIONS = ['Frete incluso', 'Frete não incluso'];
 var CONDITION_OPTIONS = ['Novo', 'Lacrado', 'Aberto'];
@@ -117,7 +121,10 @@ var ADMIN_ACTIONS = {
   adminCreateSale: actionAdminCreateSale_,
   adminTransferOrder: actionAdminTransferOrder_,
   adminApproveTransfer: actionAdminApproveTransfer_,
-  adminRejectTransfer: actionAdminRejectTransfer_
+  adminRejectTransfer: actionAdminRejectTransfer_,
+  adminReminders: actionAdminReminders_,
+  adminMarkReminded: actionAdminMarkReminded_,
+  adminSendDigest: actionAdminSendDigest_
 };
 
 // Ações que alteram a planilha e precisam da trava
@@ -126,7 +133,7 @@ var WRITE_ACTIONS = {
   setChargeStatus: true, addCharge: true, addBatchCharge: true, deleteCharge: true, saveConfig: true,
   register: true, login: true, updateProfile: true, changePassword: true, updateMyOrder: true, cancelMyOrder: true,
   adminResetPassword: true, adminCreateSale: true, adminTransferOrder: true, adminApproveTransfer: true,
-  adminRejectTransfer: true, requestTransfer: true, cancelTransferRequest: true
+  adminRejectTransfer: true, requestTransfer: true, cancelTransferRequest: true, adminMarkReminded: true
 };
 
 function handle_(action, params) {
@@ -368,6 +375,8 @@ function publicConfig_() {
   PUBLIC_CONFIG_KEYS.forEach(function (k) { out[k] = map[k] || ''; });
   out.claimsOpen = yes_(out.claimsOpen);
   out.requireLogin = yes_(out.requireLogin);
+  out.acceptCard = yes_(out.acceptCard);
+  out.paymentMethods = PAYMENT_METHODS;
   out.maxPerClaim = Math.max(1, Math.floor(num_(out.maxPerClaim) || 5));
   out.orderStatuses = ORDER_STATUSES;
   out.shippingCostOptions = SHIPPING_COST_OPTIONS;
@@ -434,14 +443,15 @@ function toOrder_(r) {
     transferName: str_(v[17]),
     transferWhatsapp: phone_(v[18]),
     transferContact: str_(v[19]),
-    history: str_(v[20])
+    history: str_(v[20]),
+    paymentMethod: oneOf_(v[21], PAYMENT_METHODS) || 'Pix'
   };
 }
 
 function orderRow_(o) {
   return [o.orderId, dateCell_(o.createdAt), o.productId, o.productName,
     o.member, o.batch, o.buyerName, o.contact, o.whatsapp, o.quantity, o.unitPrice, o.itemTotal, o.shipping, o.status, o.note,
-    o.payment || '', o.buyerNote || '', o.transferName || '', o.transferWhatsapp || '', o.transferContact || '', o.history || ''];
+    o.payment || '', o.buyerNote || '', o.transferName || '', o.transferWhatsapp || '', o.transferContact || '', o.history || '', o.paymentMethod || 'Pix'];
 }
 
 function toCharge_(r) {
@@ -456,13 +466,14 @@ function toCharge_(r) {
     status: str_(v[5]) || 'Pendente',
     createdAt: date_(v[6]),
     paidAt: date_(v[7]),
-    dueDate: dateKey_(v[8])
+    dueDate: dateKey_(v[8]),
+    lastReminder: dateKey_(v[9])
   };
 }
 
 function chargeRow_(c) {
   return [c.chargeId, c.orderId, c.whatsapp, c.description, c.amount, c.status,
-    dateCell_(c.createdAt), dateCell_(c.paidAt), dateText_(c.dueDate)];
+    dateCell_(c.createdAt), dateCell_(c.paidAt), dateText_(c.dueDate), dateText_(c.lastReminder)];
 }
 
 function strip_(obj) {
@@ -532,7 +543,9 @@ function actionClaim_(params) {
   var whatsapp = client ? client.whatsapp : phone_(params.whatsapp);
   var quantity = Math.floor(num_(params.quantity));
   var shipping = SHIPPING_OPTIONS.indexOf(str_(params.shipping)) >= 0 ? str_(params.shipping) : SHIPPING_OPTIONS[0];
-  var wantsInstallments = str_(params.paymentPlan) === 'parcelado';
+  var paymentMethod = oneOf_(params.paymentMethod, PAYMENT_METHODS) || 'Pix';
+  if (paymentMethod !== 'Pix' && !config.acceptCard) throw userError_('No momento aceitamos só Pix.');
+  var wantsInstallments = paymentMethod === 'Pix' && str_(params.paymentPlan) === 'parcelado';
 
   if (buyerName.length < 2) throw userError_('Informe seu nome.');
   if (!contact) throw userError_('Informe seu @ do Instagram ou Twitter.');
@@ -569,10 +582,11 @@ function actionClaim_(params) {
     status: 'Reservado',
     note: '',
     buyerNote: buyerNote,
-    payment: ''
+    payment: '',
+    paymentMethod: paymentMethod
   };
   var plan = paymentPlan_(product, order.itemTotal, wantsInstallments);
-  order.payment = plan.label;
+  order.payment = paymentMethod === 'Pix' ? plan.label : 'Cartão de crédito';
   appendRow_('orders', orderRow_(order));
 
   var ids = chargeIds_();
@@ -663,6 +677,10 @@ function actionAdminData_() {
   var map = getConfigMap_();
   var config = publicConfig_();
   config.claimsOpen = yes_(map.claimsOpen);
+  config.reminderEmail = str_(map.reminderEmail);
+  config.reminderDaysBefore = reminderDays_(map);
+  config.dailyEmailActive = dailyTriggerActive_();
+  config.today = dateKey_(new Date());
   return {
     ok: true,
     config: config,
@@ -916,11 +934,17 @@ function actionDeleteCharge_(params) {
 function actionSaveConfig_(params) {
   var input = params.config || {};
   var rows = readRows_('config');
-  var editable = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'noticeBanner', 'claimsOpen', 'maxPerClaim', 'requireLogin'];
+  var editable = ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'noticeBanner', 'claimsOpen', 'maxPerClaim', 'requireLogin',
+    'acceptCard', 'reminderEmail', 'reminderDaysBefore'];
   editable.forEach(function (key) {
     if (input[key] === undefined) return;
     var value = input[key];
-    if (key === 'claimsOpen' || key === 'requireLogin') value = value ? 'SIM' : 'NÃO';
+    if (key === 'claimsOpen' || key === 'requireLogin' || key === 'acceptCard') value = value ? 'SIM' : 'NÃO';
+    if (key === 'reminderDaysBefore') value = String(Math.max(0, Math.min(15, Math.floor(num_(value)) || 0)));
+    if (key === 'reminderEmail') {
+      value = str_(value).toLowerCase();
+      if (value && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) throw userError_('E-mail inválido.');
+    }
     if (key === 'maxPerClaim') value = String(Math.max(1, Math.floor(num_(value)) || 1));
     if (key === 'adminWhatsapp') value = str_(value).replace(/\D/g, '');
     value = str_(value).slice(0, 300);
@@ -1141,6 +1165,15 @@ function actionUpdateMyOrder_(params) {
   if (order.status !== 'Reservado') throw userError_('Esse pedido já está em andamento. Fale com a ADM.');
   if (params.buyerNote !== undefined) order.buyerNote = str_(params.buyerNote).replace(/\s+/g, ' ').slice(0, 300);
   if (params.shipping !== undefined && SHIPPING_OPTIONS.indexOf(str_(params.shipping)) >= 0) order.shipping = str_(params.shipping);
+  if (params.paymentMethod !== undefined) {
+    var method = oneOf_(params.paymentMethod, PAYMENT_METHODS);
+    if (!method) throw userError_('Forma de pagamento inválida.');
+    if (method !== 'Pix' && !publicConfig_().acceptCard) throw userError_('No momento aceitamos só Pix.');
+    if (method !== 'Pix' && orderCharges_(order).length > 1) throw userError_('Pedido no Pix parcelado não pode ir para o cartão. Fale com a ADM.');
+    if (method !== order.paymentMethod) addHistory_(order, 'forma de pagamento: ' + method);
+    order.paymentMethod = method;
+    order.payment = method === 'Pix' ? 'Pix à vista' : 'Cartão de crédito';
+  }
   writeRow_('orders', order.rowNumber, orderRow_(order));
   return { ok: true, order: strip_(order) };
 }
@@ -1372,4 +1405,215 @@ function actionAdminCreateSale_(params) {
   });
   order.createdAt = created.toISOString();
   return { ok: true, order: order, charges: charges, product: product };
+}
+
+// ----------------------------------------------------------------------------
+// COBRANÇAS DO DIA + RESUMO DIÁRIO POR E-MAIL
+// ----------------------------------------------------------------------------
+// Monta, por compradora, o que está vencido, vence hoje ou vence nos próximos
+// N dias (Config: reminderDaysBefore). Cada grupo já vem com a mensagem pronta
+// e o link do WhatsApp. O resumo vai por e-mail todo dia (gatilho diário).
+
+var DAILY_HANDLER = 'enviarResumoDiario';
+
+function reminderDays_(map) {
+  var n = Math.floor(num_((map || getConfigMap_()).reminderDaysBefore));
+  return isFinite(n) && n >= 0 ? Math.min(15, n) : 2;
+}
+
+function addDaysKey_(key, days) {
+  var p = key.split('-');
+  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + days, 12);
+  return dateKey_(d);
+}
+
+function brl_(n) {
+  var parts = money_(n).toFixed(2).split('.');
+  return 'R$ ' + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + parts[1];
+}
+
+function waUrl_(whatsapp, text) {
+  var d = phone_(whatsapp);
+  if (!d) return '';
+  return 'https://wa.me/55' + d + '?text=' + encodeURIComponent(text);
+}
+
+function reminderGroups_() {
+  var map = getConfigMap_();
+  var config = publicConfig_();
+  var today = dateKey_(new Date());
+  var limit = addDaysKey_(today, reminderDays_(map));
+  var orders = {};
+  allOrders_().forEach(function (o) { if (o.status !== 'Cancelado') orders[o.orderId] = o; });
+
+  var groups = {};
+  var cardWaiting = {};
+  allCharges_().forEach(function (c) {
+    var o = orders[c.orderId];
+    if (!o || c.status !== 'Pendente') return;
+    if (o.paymentMethod === 'Cartão de crédito') cardWaiting[o.orderId] = o;
+    if (!c.dueDate || c.dueDate > limit) return;
+    var kind = c.dueDate < today ? 'overdue' : c.dueDate === today ? 'today' : 'soon';
+    var key = o.whatsapp || 'sem:' + o.buyerName;
+    var g = groups[key] = groups[key] || {
+      whatsapp: o.whatsapp, name: o.buyerName, contact: o.contact, items: [], total: 0,
+      overdue: 0, today: 0, soon: 0, remindedToday: true, hasCard: false
+    };
+    g.items.push({
+      chargeId: c.chargeId, orderId: o.orderId, productName: o.productName, quantity: o.quantity,
+      description: c.description, amount: c.amount, dueDate: c.dueDate, kind: kind, paymentMethod: o.paymentMethod
+    });
+    g.total = money_(g.total + c.amount);
+    g[kind]++;
+    if (c.lastReminder !== today) g.remindedToday = false;
+    if (o.paymentMethod === 'Cartão de crédito') g.hasCard = true;
+  });
+
+  var list = Object.keys(groups).map(function (k) {
+    var g = groups[k];
+    g.items.sort(function (a, b) { return a.dueDate < b.dueDate ? -1 : 1; });
+    g.kind = g.overdue ? 'overdue' : g.today ? 'today' : 'soon';
+    g.message = reminderMessage_(g, config);
+    g.link = waUrl_(g.whatsapp, g.message);
+    return g;
+  });
+  var rank = { overdue: 0, today: 1, soon: 2 };
+  list.sort(function (a, b) { return rank[a.kind] - rank[b.kind] || b.total - a.total; });
+
+  var cards = Object.keys(cardWaiting).map(function (id) {
+    var o = cardWaiting[id];
+    var text = 'Oii ' + o.buyerName.split(' ')[0] + '! 💜 Aqui é da ' + config.storeName + '. Segue o link para pagar no cartão o pedido ' +
+      o.orderId + ' (' + o.quantity + 'x ' + o.productName + ' — ' + brl_(o.itemTotal) + '): ';
+    return { orderId: o.orderId, name: o.buyerName, whatsapp: o.whatsapp, productName: o.productName, quantity: o.quantity,
+      total: o.itemTotal, createdAt: date_(o.createdAt), link: waUrl_(o.whatsapp, text) };
+  });
+  return { today: today, daysBefore: reminderDays_(map), groups: list, cards: cards };
+}
+
+function reminderMessage_(g, config) {
+  var line = function (i) {
+    return '• ' + i.orderId + ' — ' + i.quantity + 'x ' + i.productName + ': ' + i.description + ' (' + brl_(i.amount) + ')';
+  };
+  var section = function (kind, title, suffix) {
+    var items = g.items.filter(function (i) { return i.kind === kind; });
+    if (!items.length) return '';
+    return title + '\n' + items.map(function (i) { return line(i) + suffix(i); }).join('\n') + '\n\n';
+  };
+  var text = 'Oii ' + g.name.split(' ')[0] + '! 💜 Passando para lembrar dos pagamentos da ' + config.storeName + ':\n\n' +
+    section('overdue', '⚠️ *Vencido*', function (i) { return ' — venceu ' + dateText_(i.dueDate).slice(0, 5); }) +
+    section('today', '📅 *Vence hoje*', function () { return ''; }) +
+    section('soon', '⏰ *Vence em breve*', function (i) { return ' — até ' + dateText_(i.dueDate).slice(0, 5); }) +
+    '*Total: ' + brl_(g.total) + '*\n';
+  var pix = g.items.some(function (i) { return i.paymentMethod !== 'Cartão de crédito'; });
+  if (pix && config.pixKey) text += 'Chave Pix: ' + config.pixKey + (config.pixName ? ' (' + config.pixName + ')' : '') + '\n';
+  if (g.hasCard) text += 'Para o que é no cartão, se ainda não recebeu o link é só me avisar!\n';
+  return text + '\nDepois de pagar, me manda o comprovante por aqui. 💜';
+}
+
+function actionAdminReminders_() {
+  var r = reminderGroups_();
+  r.ok = true;
+  return r;
+}
+
+function actionAdminMarkReminded_(params) {
+  var ids = {};
+  (params.chargeIds || []).forEach(function (id) { ids[str_(id)] = true; });
+  var today = dateKey_(new Date());
+  var count = 0;
+  allCharges_().forEach(function (c) {
+    if (!ids[c.chargeId]) return;
+    c.lastReminder = today;
+    writeRow_('charges', c.rowNumber, chargeRow_(c));
+    count++;
+  });
+  return { ok: true, count: count };
+}
+
+function dailyTriggerActive_() {
+  try {
+    return ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === DAILY_HANDLER; });
+  } catch (err) {
+    return false; // ainda sem autorização para ver os gatilhos
+  }
+}
+
+function digestHtml_(r, config) {
+  var esc = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var titles = { overdue: '⚠️ Vencidas', today: '📅 Vencem hoje', soon: '⏰ Vencem nos próximos ' + r.daysBefore + ' dia(s)' };
+  var html = '<div style="font-family:Arial,sans-serif;color:#1e293b;max-width:640px">' +
+    '<h2 style="color:#6b21a8">💜 ' + esc(config.storeName) + ' — cobranças de ' + esc(dateText_(r.today)) + '</h2>';
+  ['overdue', 'today', 'soon'].forEach(function (kind) {
+    var gs = r.groups.filter(function (g) { return g.kind === kind; });
+    if (!gs.length) return;
+    html += '<h3 style="margin:20px 0 8px">' + titles[kind] + ' (' + gs.length + ')</h3>';
+    gs.forEach(function (g) {
+      html += '<div style="border:1px solid #e9d5ff;border-radius:12px;padding:10px 12px;margin:8px 0">' +
+        '<b>' + esc(g.name) + '</b> ' + esc(g.contact || '') + ' — <b>' + brl_(g.total) + '</b>' +
+        (g.remindedToday ? ' <span style="color:#059669">(já cobrada hoje)</span>' : '') +
+        '<ul style="margin:6px 0;padding-left:18px;font-size:13px">' +
+        g.items.map(function (i) {
+          return '<li>' + esc(i.orderId + ' — ' + i.quantity + 'x ' + i.productName + ': ' + i.description) + ' — ' + brl_(i.amount) +
+            ' (venc. ' + dateText_(i.dueDate) + ')' + (i.paymentMethod === 'Cartão de crédito' ? ' 💳' : '') + '</li>';
+        }).join('') + '</ul>' +
+        (g.link ? '<a href="' + g.link + '" style="display:inline-block;background:#059669;color:#fff;padding:8px 14px;border-radius:10px;text-decoration:none;font-weight:bold">Enviar cobrança no WhatsApp</a>'
+          : '<span style="color:#b45309">Sem WhatsApp cadastrado</span>') +
+        '</div>';
+    });
+  });
+  if (r.cards.length) {
+    html += '<h3 style="margin:20px 0 8px">💳 Escolheram cartão — enviar link (' + r.cards.length + ')</h3>';
+    r.cards.forEach(function (c) {
+      html += '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;margin:8px 0;font-size:13px">' +
+        '<b>' + esc(c.name) + '</b> — ' + esc(c.orderId + ' • ' + c.quantity + 'x ' + c.productName) + ' — ' + brl_(c.total) +
+        (c.link ? ' — <a href="' + c.link + '">mandar link</a>' : '') + '</div>';
+    });
+  }
+  return html + '<p style="font-size:12px;color:#64748b;margin-top:24px">Também está no site: ADM → Cobranças do dia. ' +
+    'Os botões abrem o WhatsApp com a mensagem pronta.</p></div>';
+}
+
+// Envia o resumo. Sem nada para cobrar, não manda e-mail (a não ser no teste).
+function sendDigest_(force) {
+  var map = getConfigMap_();
+  var to = str_(map.reminderEmail);
+  if (!to) throw userError_('Cadastre o e-mail do resumo em ADM → Configurações.');
+  var config = publicConfig_();
+  var r = reminderGroups_();
+  var empty = !r.groups.length && !r.cards.length;
+  if (empty && !force) return { sent: false, groups: 0 };
+  var count = function (k) { return r.groups.filter(function (g) { return g.kind === k; }).length; };
+  var subject = config.storeName + ' — cobranças de ' + dateText_(r.today) + ': ' + count('overdue') + ' vencida(s), ' +
+    count('today') + ' hoje, ' + count('soon') + ' em breve' + (r.cards.length ? ', ' + r.cards.length + ' cartão' : '');
+  var html = empty ? '<p>Nenhuma cobrança vencida ou vencendo nos próximos dias. 🎉 (e-mail de teste)</p>' : digestHtml_(r, config);
+  MailApp.sendEmail({ to: to, subject: subject, htmlBody: html, name: config.storeName });
+  return { sent: true, groups: r.groups.length, cards: r.cards.length, to: to };
+}
+
+// Chamado pelo gatilho diário
+function enviarResumoDiario() {
+  setup();
+  sendDigest_(false);
+}
+
+// >>> Rode esta função UMA VEZ no editor do Apps Script para ligar o resumo diário (8h) <<<
+function ativarResumoDiario() {
+  setup();
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === DAILY_HANDLER) ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger(DAILY_HANDLER).timeBased().everyDays(1).atHour(8).create();
+  try {
+    sendDigest_(true);
+  } catch (err) {
+    Logger.log('Resumo ativado. Para receber, cadastre o e-mail em ADM → Configurações. (' + (err.userMessage || err.message) + ')');
+    return;
+  }
+  Logger.log('Resumo diário ativado (todo dia por volta das 8h). Um e-mail de teste foi enviado agora.');
+}
+
+function actionAdminSendDigest_() {
+  var r = sendDigest_(true);
+  r.ok = true;
+  return r;
 }

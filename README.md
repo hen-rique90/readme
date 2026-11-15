@@ -34,6 +34,12 @@ Ferramenta para anunciar os produtos da CEG. A compradora faz o claim e o item f
 - **Repasse pela cliente:** em "Meus Pedidos" (logada), itens **totalmente pagos** têm "Repassar este item": ela informa nome e WhatsApp de quem fica com o item e o pedido aguarda a **aprovação da ADM** (ADM → Pedidos → "Repasses aguardando").
 - **Repasse pela ADM:** em cada pedido, "Repassar para outra pessoa / corrigir compradora" — para claim feito no nome errado (vale mesmo sem pagamento; o que falta pagar vai junto) ou para corrigir nome/WhatsApp. Tudo fica no **Histórico** do pedido.
 
+## Cobranças e forma de pagamento
+- **ADM → Cobranças do dia:** separa sozinho o que está **vencido**, **vence hoje** e **vence nos próximos dias** (padrão: 2). Cada cliente tem o botão "Enviar cobrança", que abre o WhatsApp com a mensagem pronta (itens, valores, vencimentos e chave Pix) e marca "cobrada hoje".
+- **Resumo diário por e-mail:** cadastre o e-mail em ADM → Configurações e, no editor do Apps Script, rode **uma vez** a função `ativarResumoDiario` (ela pede autorização para enviar e-mail e criar o gatilho, e manda um e-mail de teste). Depois disso, todo dia por volta das 8h chega o resumo com os links de cobrança — só quando há algo a cobrar. Confira em *Configurações do projeto* se o fuso horário é `(GMT-03:00) São Paulo`.
+- **Pix ou cartão de crédito:** no claim a cliente escolhe a forma de pagamento (pode trocar logo depois do claim). O site **não pede dados do cartão**: o pedido fica marcado "💳 Cartão", a mensagem de WhatsApp para a loja já diz que ela escolheu cartão, e esses pedidos aparecem em "Cobranças do dia" e no resumo diário para vocês mandarem o link. Dá para desligar o cartão em ADM → Configurações.
+- Os lembretes automáticos são enviados por você (um toque por cliente) porque mensagens automáticas no WhatsApp só são permitidas pela API oficial da Meta.
+
 ## Estrutura
 
 ```
