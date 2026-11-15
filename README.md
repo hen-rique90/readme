@@ -47,6 +47,11 @@ Ferramenta para anunciar os produtos da CEG. A compradora faz o claim e o item f
 - **ADM → Envios:** endereço para copiar, itens, pacote, frete pago ou não; informar o valor quando não houve cotação automática; marcar **Enviado** com o rastreio (os itens viram "Enviado") e avisar a cliente no WhatsApp.
 - **Configuração:** ADM → Configurações → Frete: CEP de origem, e-mail técnico e os **tokens** do Melhor Envio e do SuperFrete (guardados em segredo nas Propriedades do script — nunca na planilha nem no site).
 
+## Fotos enviadas do celular
+- Em todo campo de foto do painel (pedido já feito → "Editar item", produto, foto por membro, "Registrar venda" e "Separar por membro") há o botão **📷 Enviar foto**: escolha a foto no celular/computador e o link é preenchido sozinho.
+- A foto é reduzida no aparelho (até 1200 px) e salva na pasta **"CEG Fotos"** do seu Google Drive, compartilhada como "qualquer pessoa com o link pode ver".
+- Na primeira vez, rode `setup` no editor do Apps Script e autorize o acesso ao **Google Drive**.
+
 ## Estrutura
 
 ```

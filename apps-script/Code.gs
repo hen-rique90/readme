@@ -158,7 +158,8 @@ var ADMIN_ACTIONS = {
   adminSaveShippingSettings: actionAdminSaveShippingSettings_,
   adminSetShippingPrice: actionAdminSetShippingPrice_,
   adminMarkShipped: actionAdminMarkShipped_,
-  adminTestShippingQuote: actionAdminTestShippingQuote_
+  adminTestShippingQuote: actionAdminTestShippingQuote_,
+  adminUploadPhoto: actionAdminUploadPhoto_
 };
 
 // Ações que alteram a planilha e precisam da trava
@@ -2170,6 +2171,51 @@ function shippingSettings_() {
 }
 
 // ADM: cotação de teste para conferir tokens e CEP (sem cliente nem pedido)
+// ---------- Fotos enviadas do celular (pasta "CEG Fotos" no Google Drive) ----------
+var PHOTO_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+
+function photosFolder_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('PHOTOS_FOLDER_ID');
+  if (id) {
+    try {
+      var folder = DriveApp.getFolderById(id);
+      if (!folder.isTrashed()) return folder;
+    } catch (err) { /* pasta apagada: cria outra */ }
+  }
+  var created = DriveApp.createFolder('CEG Fotos');
+  props.setProperty('PHOTOS_FOLDER_ID', created.getId());
+  return created;
+}
+
+function actionAdminUploadPhoto_(params) {
+  var type = str_(params.mimeType).toLowerCase();
+  if (!PHOTO_TYPES[type]) return { ok: false, error: 'Envie uma foto JPG, PNG ou WEBP.' };
+  var data = str_(params.data).replace(/^data:[^,]*,/, '');
+  if (!data) return { ok: false, error: 'Foto vazia.' };
+  if (data.length > 8000000) return { ok: false, error: 'Foto grande demais. Tente uma menor.' };
+  var bytes;
+  try {
+    bytes = Utilities.base64Decode(data);
+  } catch (err) {
+    return { ok: false, error: 'Não consegui ler a foto. Tente outra.' };
+  }
+  var label = str_(params.name).replace(/[^\w\- À-ú]/g, '').slice(0, 60) || 'foto';
+  var name = label + ' ' + new Date().getTime() + '.' + PHOTO_TYPES[type];
+  var file;
+  try {
+    file = photosFolder_().createFile(Utilities.newBlob(bytes, type, name));
+  } catch (err) {
+    return { ok: false, error: 'O Google Drive não aceitou a foto. No editor do Apps Script, rode a função setup e autorize o acesso ao Drive. (' + err.message + ')' };
+  }
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (err) {
+    return { ok: false, error: 'A foto foi salva no Drive, mas não consegui deixá-la pública (sua conta não permite compartilhar com "qualquer pessoa com o link"). Use um link do Imgur.' };
+  }
+  return { ok: true, url: file.getUrl(), fileId: file.getId() };
+}
+
 function actionAdminTestShippingQuote_(params) {
   var cep = str_(params.cep).replace(/\D/g, '');
   if (cep.length !== 8) throw userError_('Informe um CEP de destino válido.');

@@ -132,6 +132,13 @@ export const imageCandidates = (raw) => {
     url.match(/docs\.google\.com\/uc\?(?:.*&)?id=([\w-]{10,})/);
   if (drive) {
     const id = drive[1];
+    if (id.startsWith('demofoto')) {
+      // Modo demonstração: a foto "enviada ao Drive" fica guardada no navegador
+      try {
+        const saved = localStorage.getItem('ceg_demo_' + id);
+        if (saved) return [saved];
+      } catch { /* ignore */ }
+    }
     return [
       `https://drive.google.com/thumbnail?id=${id}&sz=w1000`,
       `https://lh3.googleusercontent.com/d/${id}=w1000`

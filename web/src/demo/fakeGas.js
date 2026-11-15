@@ -131,7 +131,9 @@ export const fakeUtilities = {
   computeDigest: (_alg, value) => toSigned(sha256(utf8(value))),
   computeHmacSha256Signature: (value, key) => toSigned(hmacSha256(value, key)),
   base64EncodeWebSafe: (bytes) => b64ws(bytes),
-  getUuid: () => crypto.randomUUID()
+  getUuid: () => crypto.randomUUID(),
+  base64Decode: (b64) => b64,
+  newBlob: (data, type, name) => ({ data, type, name })
 };
 
 /**
@@ -185,6 +187,36 @@ export function createFakeGas(state = { sheets: {} }, onChange = () => {}) {
       }
     },
     Logger: { log: () => {} },
+    // Drive simulado: guarda as fotos em memória (e no navegador, para a demonstração mostrar)
+    files: {},
+    DriveApp: {
+      Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK' },
+      Permission: { VIEW: 'VIEW' },
+      getFolderById: (id) => {
+        if (!(state.folders || []).includes(id)) throw new Error('not found');
+        return gas.fakeFolder(id);
+      },
+      createFolder: (name) => {
+        const id = 'pasta' + ((state.folders || []).length + 1) + name.length;
+        state.folders = [...(state.folders || []), id];
+        return gas.fakeFolder(id);
+      }
+    },
+    fakeFolder: (id) => ({
+      getId: () => id,
+      isTrashed: () => false,
+      createFile: (blob) => {
+        const fileId = 'demofoto' + crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+        const dataUrl = `data:${blob.type};base64,${blob.data}`;
+        gas.files[fileId] = { ...blob, folder: id, sharing: null };
+        try { localStorage.setItem('ceg_demo_' + fileId, dataUrl); } catch { /* sem armazenamento */ }
+        return {
+          getId: () => fileId,
+          getUrl: () => `https://drive.google.com/file/d/${fileId}/view?usp=drivesdk`,
+          setSharing: (access, perm) => { gas.files[fileId].sharing = access + ':' + perm; }
+        };
+      }
+    }),
     ScriptApp: {
       getProjectTriggers: () => triggers.map((t) => ({ getHandlerFunction: () => t.handler, _t: t })),
       deleteTrigger: (t) => { triggers.splice(triggers.indexOf(t._t), 1); },
@@ -215,11 +247,11 @@ export function createFakeGas(state = { sheets: {} }, onChange = () => {}) {
 /** Carrega o código do Apps Script dentro do ambiente simulado. */
 export function loadBackend(code, gas) {
   const factory = new Function(
-    'SpreadsheetApp', 'LockService', 'CacheService', 'ContentService', 'Utilities', 'PropertiesService', 'ScriptApp', 'MailApp', 'Logger', 'UrlFetchApp',
+    'SpreadsheetApp', 'LockService', 'CacheService', 'ContentService', 'Utilities', 'PropertiesService', 'ScriptApp', 'MailApp', 'Logger', 'UrlFetchApp', 'DriveApp',
     `${code}\nreturn { doGet: doGet, doPost: doPost, setup: setup, ativarResumoDiario: ativarResumoDiario, enviarResumoDiario: enviarResumoDiario };`
   );
   const backend = factory(gas.SpreadsheetApp, gas.LockService, gas.CacheService, gas.ContentService, gas.Utilities, gas.PropertiesService,
-    gas.ScriptApp, gas.MailApp, gas.Logger, gas.UrlFetchApp);
+    gas.ScriptApp, gas.MailApp, gas.Logger, gas.UrlFetchApp, gas.DriveApp);
   return {
     call(action, params = {}) {
       const out = backend.doPost({ postData: { contents: JSON.stringify({ action, ...params }) } });
