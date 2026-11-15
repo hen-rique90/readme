@@ -313,3 +313,9 @@ export const formatPhoneTyping = (v) => {
   if (d.length <= 10) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
   return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
 };
+
+export const addDaysKey = (key, days) => {
+  const [y, m, d] = key.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+};

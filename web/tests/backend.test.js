@@ -31,7 +31,7 @@ const buyer = { buyerName: 'Mariana Silva', contact: '@mari', whatsapp: '(11) 98
 
 test('cria as abas e a configuração inicial', () => {
   const { gas } = freshBackend();
-  assert.deepEqual(Object.keys(gas.state.sheets).sort(), ['Clientes', 'Cobranças', 'Config', 'Pedidos', 'Produtos']);
+  assert.deepEqual(Object.keys(gas.state.sheets).sort(), ['Clientes', 'Cobranças', 'Config', 'Pedidos', 'Produtos', 'Solicitações']);
 });
 
 test('ADM bloqueado enquanto a senha padrão não for trocada', () => {
@@ -754,4 +754,70 @@ test('separar pedido "Jin e Jimin": divide valor e cobranças, mantendo o que fo
   assert.match(byMember.Jimin.history, /separado do pedido/);
   const total = gas.state.sheets['Cobranças'].slice(1).reduce((a, r) => a + Number(r[4]), 0);
   assert.equal(total, 30, 'nada some nem sobra nas cobranças');
+});
+
+// ---------------------------------------------------------------- solicitações: correção e prorrogação
+test('prorrogação: cliente pede nova data, ADM aceita (com outra data) e o vencimento muda', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3, dueDate: dayKey(1) });
+  const reg = api.call('register', { name: 'Ana Souza', contact: '@ana', whatsapp: '41999990000', password: '123456' });
+  const { order } = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+
+  assert.equal(api.call('requestExtension', { token: reg.token, orderId: order.orderId, newDate: dayKey(0) }).ok, false, 'data tem que ser futura');
+  const req = api.call('requestExtension', { token: reg.token, orderId: order.orderId, newDate: dayKey(20), message: 'Recebo dia 20' });
+  assert.equal(req.ok, true, req.error);
+  assert.equal(api.call('requestExtension', { token: reg.token, orderId: order.orderId, newDate: dayKey(25) }).ok, false, 'uma por vez');
+
+  const data = admin('adminData');
+  assert.equal(data.requests.length, 1);
+  assert.equal(data.requests[0].status, 'Pendente');
+
+  const ans = admin('adminAnswerRequest', { requestId: req.request.requestId, decision: 'accept', date: dayKey(15), reply: 'Combinado!' });
+  assert.equal(ans.ok, true, ans.error);
+  assert.ok(ans.notifyLink.startsWith('https://wa.me/5541999990000?text='));
+  assert.match(decodeURIComponent(ans.notifyLink), /aceita/);
+
+  const mine = api.call('myOrders', { token: reg.token });
+  assert.equal(mine.orders[0].charges[0].dueDate, dayKey(15));
+  assert.equal(mine.orders[0].requests[0].status, 'Aceita');
+  assert.equal(mine.orders[0].requests[0].reply, 'Combinado!');
+  assert.match(mine.orders[0].history, /prorrogação aceita/);
+  assert.equal(admin('adminAnswerRequest', { requestId: req.request.requestId, decision: 'reject' }).ok, false, 'já respondida');
+});
+
+test('correção: cliente pede, ADM resolve ou recusa; outra pessoa não pede pelo pedido dela', () => {
+  const { api, admin } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3 });
+  const reg = api.call('register', { name: 'Ana', contact: '@ana', whatsapp: '41999990000', password: '123456' });
+  const other = api.call('register', { name: 'Bia', contact: '@bia', whatsapp: '21977776666', password: '123456' });
+  const { order } = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+
+  assert.equal(api.call('requestCorrection', { token: other.token, orderId: order.orderId, message: 'O valor está errado' }).ok, false);
+  assert.equal(api.call('requestCorrection', { token: reg.token, orderId: order.orderId, message: 'oi' }).ok, false, 'mensagem curta');
+  const r1 = api.call('requestCorrection', { token: reg.token, orderId: order.orderId, message: 'O valor está errado, era R$ 90' });
+  assert.equal(r1.ok, true, r1.error);
+  const ans = admin('adminAnswerRequest', { requestId: r1.request.requestId, decision: 'resolve', reply: 'Corrigido para R$ 90' });
+  assert.equal(ans.ok, true, ans.error);
+  assert.match(decodeURIComponent(ans.notifyLink), /Corrigido para R\$ 90/);
+
+  const r2 = api.call('requestCorrection', { token: reg.token, orderId: order.orderId, message: 'Quero trocar o membro' });
+  assert.equal(admin('adminAnswerRequest', { requestId: r2.request.requestId, decision: 'reject', reply: 'Não dá para trocar' }).ok, true);
+  const r3 = api.call('requestCorrection', { token: reg.token, orderId: order.orderId, message: 'Outra coisa errada aqui' });
+  assert.equal(api.call('cancelMyRequest', { token: reg.token, requestId: r3.request.requestId }).ok, true);
+  const statuses = api.call('myOrders', { token: reg.token }).orders[0].requests.map((r) => r.status).sort();
+  assert.deepEqual(statuses, ['Cancelada', 'Recusada', 'Resolvida']);
+});
+
+test('resumo diário avisa solicitações pendentes', () => {
+  const { api, admin, gas } = freshBackend();
+  const p = addProduct(admin, { totalStock: 3, dueDate: dayKey(30) });
+  const reg = api.call('register', { name: 'Ana', contact: '@ana', whatsapp: '41999990000', password: '123456' });
+  const { order } = api.call('claim', { token: reg.token, productId: p.id, quantity: 1 });
+  api.call('requestExtension', { token: reg.token, orderId: order.orderId, newDate: dayKey(40) });
+  admin('saveConfig', { config: { reminderEmail: 'loja@exemplo.com' } });
+  gas.state.sheets['Config'].find((r) => r[0] === 'reminderEmail')[1] = 'loja@exemplo.com';
+  api.run('enviarResumoDiario');
+  assert.equal(gas.sentEmails.length, 1, 'manda e-mail mesmo sem cobrança vencendo, porque há solicitação');
+  assert.match(gas.sentEmails[0].subject, /1 solicitação/);
+  assert.match(gas.sentEmails[0].htmlBody, /pede prazo até/);
 });
