@@ -313,3 +313,15 @@ export const formatPhoneTyping = (v) => {
   if (d.length <= 10) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
   return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
 };
+
+// ---- Busca do ADM: texto normal OU telefone em qualquer formato
+// "(17)99163-0561", "17 99163 0561", "+55 17 99163-0561" e "0561" acham 17991630561
+export const matchesSearch = (query, text, phones = []) => {
+  const q = String(query || '').toLowerCase().trim();
+  if (!q) return true;
+  if (String(text || '').toLowerCase().includes(q)) return true;
+  let digits = q.replace(/\D/g, '');
+  if (digits.length < 4) return false;
+  if (digits.length > 11 && digits.startsWith('55')) digits = digits.slice(2);
+  return phones.some((p) => String(p || '').replace(/\D/g, '').includes(digits));
+};
