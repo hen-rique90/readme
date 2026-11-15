@@ -164,7 +164,7 @@ var ADMIN_ACTIONS = {
 
 // Ações que alteram a planilha e precisam da trava
 var WRITE_ACTIONS = {
-  claim: true, saveProduct: true, saveProductBatch: true, deleteProduct: true, setOrderStatus: true, setOrderNote: true,
+  claim: true, adminData: true, saveProduct: true, saveProductBatch: true, deleteProduct: true, setOrderStatus: true, setOrderNote: true,
   setChargeStatus: true, addCharge: true, addBatchCharge: true, deleteCharge: true, saveConfig: true,
   register: true, login: true, updateProfile: true, changePassword: true, updateMyOrder: true, cancelMyOrder: true,
   adminResetPassword: true, adminCreateSale: true, adminTransferOrder: true, adminApproveTransfer: true,
@@ -599,6 +599,14 @@ function actionClaim_(params) {
   if (!product) throw userError_('Produto não encontrado.');
 
   var orders = allOrders_();
+  var typedName = buyerName;
+  if (!client) {
+    var known = canonicalBuyer_(whatsapp, orders, findClient_(whatsapp));
+    if (known && known.name) {
+      buyerName = known.name;
+      contact = known.contact || contact;
+    }
+  }
   var available = Math.max(0, product.totalStock - (soldMap_(orders)[product.id] || 0));
   if (available <= 0) throw userError_('Que pena! Esse item acabou de esgotar. 💔');
   if (quantity > available) throw userError_('Só restam ' + available + ' unidade(s) desse item.');
@@ -636,7 +644,9 @@ function actionClaim_(params) {
   });
 
   order.createdAt = now.toISOString();
-  return { ok: true, order: order, charge: charges[0], charges: charges, available: available - quantity };
+  var res = { ok: true, order: order, charge: charges[0], charges: charges, available: available - quantity };
+  if (buyerKey_(typedName) !== buyerName) res.nameFromPhone = buyerName;
+  return res;
 }
 
 // Divide o valor do item conforme a forma de pagamento escolhida
@@ -717,6 +727,7 @@ function actionMyOrders_(params) {
 // ----------------------------------------------------------------------------
 
 function actionAdminData_() {
+  var unified = unifyBuyersByPhone_();
   var orders = allOrders_();
   var sold = soldMap_(orders);
   var map = getConfigMap_();
@@ -737,7 +748,8 @@ function actionAdminData_() {
     shipments: allShipments_().map(strip_),
     clients: readRows_('clients').map(toClient_).map(function (c) {
       return { whatsapp: c.whatsapp, name: c.name, contact: c.contact, createdAt: c.createdAt, lastLogin: c.lastLogin, mustChange: c.mustChange };
-    })
+    }),
+    unifiedByPhone: unified
   };
 }
 
@@ -1271,19 +1283,117 @@ function todayText_() {
   return pad2_(d.getDate()) + '/' + pad2_(d.getMonth() + 1) + '/' + d.getFullYear();
 }
 
+// ---------- Mesmo WhatsApp = mesma compradora (junta sozinho) ----------
+// Nome que vale para um WhatsApp: o da conta; sem conta, o que aparece em mais
+// pedidos (empate: o mais recente). O @ segue a mesma regra.
+function buyerKey_(name) {
+  return str_(name).replace(/\s+/g, ' ').trim();
+}
+
+function canonicalBuyer_(whatsapp, orders, client) {
+  if (client) return { name: buyerKey_(client.name), contact: str_(client.contact) };
+  var stats = {};
+  orders.forEach(function (o) {
+    if (phone_(o.whatsapp) !== whatsapp) return;
+    var n = buyerKey_(o.buyerName);
+    if (!n) return;
+    var t = o.createdAt instanceof Date ? o.createdAt.getTime() : (new Date(o.createdAt).getTime() || 0);
+    var st = stats[n] = stats[n] || { name: n, count: 0, last: 0, contact: '', contactAt: -1 };
+    st.count++;
+    if (t >= st.last) st.last = t;
+    if (str_(o.contact) && t >= st.contactAt) { st.contact = str_(o.contact); st.contactAt = t; }
+  });
+  var best = null;
+  Object.keys(stats).forEach(function (k) {
+    var st = stats[k];
+    if (!best || st.count > best.count || (st.count === best.count && st.last > best.last)) best = st;
+  });
+  return best ? { name: best.name, contact: best.contact } : null;
+}
+
+// Junta na planilha os pedidos do mesmo WhatsApp que estão com nome/@ diferentes
+function unifyBuyersByPhone_() {
+  var sheet = sheet_('orders');
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return 0;
+  var groups = {};
+  for (var i = 1; i < values.length; i++) {
+    var wa = phone_(values[i][8]);
+    if (wa.length < 10 || wa.length > 11) continue;
+    (groups[wa] = groups[wa] || []).push(i);
+  }
+  var clients = {};
+  readRows_('clients').map(toClient_).forEach(function (c) { clients[phone_(c.whatsapp)] = c; });
+  var changed = 0;
+  Object.keys(groups).forEach(function (wa) {
+    var rows = groups[wa];
+    var list = rows.map(function (r) { return { buyerName: values[r][6], contact: values[r][7], whatsapp: wa, createdAt: values[r][1] }; });
+    var names = {};
+    list.forEach(function (o) { names[buyerKey_(o.buyerName)] = true; });
+    var client = clients[wa];
+    if (!client && Object.keys(names).length < 2) return;
+    var best = canonicalBuyer_(wa, list, client);
+    if (!best || !best.name) return;
+    rows.forEach(function (r) {
+      var oldName = buyerKey_(values[r][6]);
+      var nameChanged = oldName !== best.name;
+      var contactChanged = best.contact && str_(values[r][7]) !== best.contact;
+      if (!nameChanged && !contactChanged) return;
+      var note = nameChanged
+        ? 'nome unificado pelo WhatsApp: "' + (oldName || '(sem nome)') + '" → "' + best.name + '"'
+        : '@ unificado pelo WhatsApp: "' + str_(values[r][7]) + '" → "' + best.contact + '"';
+      var h = str_(values[r][20]);
+      values[r][20] = (h ? h + ' | ' : '') + todayText_() + ' ' + note;
+      values[r][6] = safeCell_(best.name);
+      if (best.contact) values[r][7] = safeCell_(best.contact);
+      values[r][8] = wa;
+      changed++;
+    });
+  });
+  if (changed) sheet.getRange(2, 1, values.length - 1, values[0].length).setValues(values.slice(1));
+  return changed;
+}
+
+function renameBuyer_(whatsapp, name, contact) {
+  var sheet = sheet_('orders');
+  var values = sheet.getDataRange().getValues();
+  var changed = 0;
+  for (var i = 1; i < values.length; i++) {
+    if (phone_(values[i][8]) !== whatsapp) continue;
+    var nameDiff = buyerKey_(values[i][6]) !== name;
+    var contactDiff = contact && str_(values[i][7]) !== contact;
+    if (!nameDiff && !contactDiff) continue;
+    var h = str_(values[i][20]);
+    values[i][20] = (h ? h + ' | ' : '') + todayText_() + ' nome corrigido pela loja em todos os pedidos deste WhatsApp: "' + buyerKey_(values[i][6]) + '" → "' + name + '"';
+    values[i][6] = safeCell_(name);
+    if (contact) values[i][7] = safeCell_(contact);
+    changed++;
+  }
+  if (changed) sheet.getRange(2, 1, values.length - 1, values[0].length).setValues(values.slice(1));
+  var account = findClient_(whatsapp);
+  if (account && (account.name !== name || (contact && account.contact !== contact))) {
+    account.name = name;
+    account.contact = contact || account.contact;
+    writeRow_('clients', account.rowNumber, clientRow_(account));
+  }
+  return changed;
+}
+
 function addHistory_(order, text) {
   order.history = (order.history ? order.history + ' | ' : '') + todayText_() + ' ' + text;
 }
 
-function recipient_(params) {
+// adminTyped: o nome digitado pela ADM vale (e depois é aplicado em todos os pedidos do número)
+function recipient_(params, adminTyped) {
   var whatsapp = phone_(params.whatsapp);
   var name = str_(params.name).slice(0, 80);
   var contact = str_(params.contact).slice(0, 60);
   if (whatsapp && (whatsapp.length < 10 || whatsapp.length > 11)) throw userError_('WhatsApp inválido. Use DDD + número, ex: 11988887777.');
-  var account = whatsapp ? findClient_(whatsapp) : null;
-  if (account) {
-    name = name || account.name;
-    contact = contact || account.contact;
+  // Mesmo WhatsApp = mesma compradora: vale o nome já conhecido desse número
+  var known = whatsapp ? canonicalBuyer_(whatsapp, allOrders_(), findClient_(whatsapp)) : null;
+  if (known && known.name) {
+    if (!(adminTyped && name)) name = known.name;
+    contact = contact || known.contact;
   }
   if (name.length < 2) throw userError_('Informe o nome de quem vai ficar com o item.');
   return { name: name, contact: contact, whatsapp: whatsapp };
@@ -1364,11 +1474,14 @@ function actionAdminRejectTransfer_(params) {
 // ADM repassa (ou corrige a compradora) direto, em qualquer situação de pagamento
 function actionAdminTransferOrder_(params) {
   var order = findOrder_(params.orderId);
-  var to = recipient_(params);
+  var to = recipient_(params, true);
   if (to.whatsapp === order.whatsapp && to.name === order.buyerName && to.contact === order.contact) {
     throw userError_('Nada mudou.');
   }
-  return { ok: true, order: transfer_(order, to, 'repassado pela loja') };
+  var moved = transfer_(order, to, 'repassado pela loja');
+  // Mesmo WhatsApp = mesma pessoa: o nome corrigido vale para todos os pedidos e para a conta
+  if (to.whatsapp) renameBuyer_(to.whatsapp, to.name, to.contact);
+  return { ok: true, order: moved };
 }
 
 // ----------------------------------------------------------------------------
