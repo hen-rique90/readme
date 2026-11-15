@@ -931,3 +931,25 @@ test('envio sem cotação automática: fica aguardando, ADM informa o valor; tok
   assert.equal(JSON.stringify(gas.state.sheets).includes('tok-me'), false, 'token não fica na planilha');
   assert.equal(JSON.stringify(api.call('catalog')).includes('tok-'), false);
 });
+
+test('frete: cotação de teste no painel e aviso de token vencido', () => {
+  const { admin, gas } = shippingSetup();
+  const ok = admin('adminTestShippingQuote', { cep: '01310-100', category: 'Álbuns' });
+  assert.equal(ok.ok, true, ok.error);
+  assert.equal(ok.package.kind, 'Caixa');
+  assert.equal(ok.options.length, 3);
+  assert.deepEqual(ok.errors, []);
+  assert.equal(admin('adminData').config.shipping.status.melhorEnvio, null, 'sem falha registrada');
+
+  gas.fetchHandler = (url) => (url.includes('melhorenvio')
+    ? { code: 401, body: { message: 'Unauthenticated.' } }
+    : { code: 200, body: [{ id: 17, name: 'Mini Envios', price: 10, delivery_time: 9, company: { name: 'Correios' } }] });
+  const bad = admin('adminTestShippingQuote', { cep: '01310100' });
+  assert.equal(bad.options.length, 1, 'SuperFrete continua funcionando');
+  assert.match(bad.errors[0], /Melhor Envio: HTTP 401 — Unauthenticated\. \(token inválido ou vencido/);
+  const status = admin('adminData').config.shipping.status;
+  assert.match(status.melhorEnvio.error, /401/);
+  assert.equal(status.superFrete, null);
+  assert.equal(JSON.stringify(gas.fetches.at(-2).options.headers['User-Agent']), JSON.stringify('Cantinho da Army CEG (loja@exemplo.com)'));
+  assert.equal(admin('adminTestShippingQuote', { cep: '123' }).ok, false);
+});

@@ -172,7 +172,7 @@ export default function Admin({ showToast, onCatalogChange }) {
       {tab === 'settings' && (
         <div className="space-y-5">
           <SettingsTab data={data} run={run} />
-          <ShippingSettings key={JSON.stringify(data.config.shipping || {})} data={data} run={run} />
+          <ShippingSettings key={JSON.stringify(data.config.shipping || {})} data={data} run={run} call={call} />
         </div>
       )}
     </main>

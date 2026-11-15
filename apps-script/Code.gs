@@ -157,7 +157,8 @@ var ADMIN_ACTIONS = {
   adminAnswerRequest: actionAdminAnswerRequest_,
   adminSaveShippingSettings: actionAdminSaveShippingSettings_,
   adminSetShippingPrice: actionAdminSetShippingPrice_,
-  adminMarkShipped: actionAdminMarkShipped_
+  adminMarkShipped: actionAdminMarkShipped_,
+  adminTestShippingQuote: actionAdminTestShippingQuote_
 };
 
 // Ações que alteram a planilha e precisam da trava
@@ -2137,6 +2138,22 @@ function shippingTokens_() {
   return { melhorEnvio: props.getProperty('MELHOR_ENVIO_TOKEN') || '', superFrete: props.getProperty('SUPERFRETE_TOKEN') || '' };
 }
 
+// Guarda a última falha de cada plataforma (para o painel mostrar quando um token vence)
+function recordShippingStatus_(key, error) {
+  var props = PropertiesService.getScriptProperties();
+  var prop = 'SHIPPING_STATUS_' + key;
+  var value = JSON.stringify({ error: error, at: new Date().toISOString() });
+  if (error || props.getProperty(prop)) props.setProperty(prop, value);
+}
+
+function shippingStatus_(key) {
+  try {
+    return JSON.parse(PropertiesService.getScriptProperties().getProperty('SHIPPING_STATUS_' + key) || 'null');
+  } catch (err) {
+    return null;
+  }
+}
+
 function shippingSettings_() {
   var map = getConfigMap_();
   var t = shippingTokens_();
@@ -2147,8 +2164,23 @@ function shippingSettings_() {
     dueDays: Math.max(0, Math.floor(num_(map.shippingDueDays) || 3)),
     packageDefaults: packageDefaults_(map),
     melhorEnvio: !!t.melhorEnvio,
-    superFrete: !!t.superFrete
+    superFrete: !!t.superFrete,
+    status: { melhorEnvio: shippingStatus_('melhorEnvio'), superFrete: shippingStatus_('superFrete') }
   };
+}
+
+// ADM: cotação de teste para conferir tokens e CEP (sem cliente nem pedido)
+function actionAdminTestShippingQuote_(params) {
+  var cep = str_(params.cep).replace(/\D/g, '');
+  if (cep.length !== 8) throw userError_('Informe um CEP de destino válido.');
+  var cat = str_(params.category) || 'Photocards';
+  var defaults = packageDefaults_();
+  var d = defaults[cat] || defaults.Outros;
+  var pkg = d.type === 'envelope'
+    ? { kind: 'Envelope', weight: (d.weight + 10) / 1000, height: Math.max(ENVELOPE.height, d.height), width: ENVELOPE.width, length: ENVELOPE.length }
+    : { kind: 'Caixa', weight: (d.weight + 100) / 1000, height: d.height, width: d.width, length: d.length };
+  var q = quotesForPackage_(pkg, cep);
+  return { ok: true, options: q.options, errors: q.errors, package: pkg };
 }
 
 // --- Endereços da compradora
@@ -2301,9 +2333,13 @@ function superFreteQuote_(token, from, to, pkg, settings, ua) {
 
 // Cota nas plataformas configuradas. Falha de uma não impede a outra.
 function quotes_(orders, address) {
+  return quotesForPackage_(buildPackage_(orders), address.cep);
+}
+
+function quotesForPackage_(pkg, toCep) {
+  var address = { cep: toCep };
   var settings = shippingSettings_();
   var tokens = shippingTokens_();
-  var pkg = buildPackage_(orders);
   var options = [];
   var errors = [];
   if (!settings.fromCep) errors.push('CEP de origem não configurado');
@@ -2312,10 +2348,15 @@ function quotes_(orders, address) {
     var ua = publicConfig_().storeName + ' (' + (settings.contactEmail || 'sem-email') + ')';
     [['melhorEnvio', melhorEnvioQuote_], ['superFrete', superFreteQuote_]].forEach(function (pair) {
       if (!tokens[pair[0]]) return;
+      var name = pair[0] === 'melhorEnvio' ? 'Melhor Envio' : 'SuperFrete';
       try {
         options = options.concat(pair[1](tokens[pair[0]], settings.fromCep, address.cep, pkg, settings, ua));
+        recordShippingStatus_(pair[0], '');
       } catch (err) {
-        errors.push((pair[0] === 'melhorEnvio' ? 'Melhor Envio' : 'SuperFrete') + ': ' + (err.message || err));
+        var msg = String(err.message || err).slice(0, 200);
+        if (/HTTP 401/.test(msg)) msg += ' (token inválido ou vencido — gere outro no painel da plataforma)';
+        errors.push(name + ': ' + msg);
+        recordShippingStatus_(pair[0], msg);
       }
     });
   }

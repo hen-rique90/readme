@@ -148,7 +148,7 @@ function ShipmentCard({ s, orders, run, notifyLink, onNotify }) {
 }
 
 // Configurações → Frete: CEP de origem, tokens das plataformas e pacotes por categoria
-export function ShippingSettings({ data, run }) {
+export function ShippingSettings({ data, run, call }) {
   const sh = data.config.shipping || {};
   const [form, setForm] = useState({
     fromCep: sh.fromCep || '', contactEmail: sh.contactEmail || '', dueDays: sh.dueDays ?? 3, sandbox: !!sh.sandbox,
@@ -194,6 +194,14 @@ export function ShippingSettings({ data, run }) {
             {sh[key] ? <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">✓ token configurado</Badge> : <Badge className="bg-slate-50 text-slate-500 border-slate-200">não configurado</Badge>}
           </div>
           <input type="password" autoComplete="off" value={form[field]} onChange={set(field)} placeholder={sh[key] ? 'Colar um token novo para trocar' : 'Cole aqui o token'} className="input" />
+          {sh.status?.[key]?.error && (
+            <p className="text-[11px] font-semibold text-rose-700">
+              ⚠️ Última falha em {formatDate(sh.status[key].at)}: {sh.status[key].error}
+            </p>
+          )}
+          {sh[key] && sh.status?.[key] && !sh.status[key].error && (
+            <p className="text-[11px] font-semibold text-emerald-700">✓ Funcionando (última cotação em {formatDate(sh.status[key].at)})</p>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
             <a href={url} target="_blank" rel="noreferrer" className="text-purple-700 underline">Onde pegar o token do {name}</a>
             {sh[key] && <button type="button" className="text-rose-600 font-bold" onClick={() => window.confirm(`Remover o token do ${name}?`) && save({ [removeKey]: true })}>Remover token</button>}
@@ -201,6 +209,7 @@ export function ShippingSettings({ data, run }) {
         </div>
       ))}
       <p className="text-[11px] text-slate-500">Os tokens ficam guardados em segredo no Apps Script: não aparecem na planilha, no site nem aqui depois de salvos.</p>
+      <TestQuote call={call} cats={cats} enabled={sh.melhorEnvio || sh.superFrete} />
       <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
         <input type="checkbox" checked={form.sandbox} onChange={set('sandbox')} className="w-4 h-4 accent-purple-600" />
         Usar ambiente de testes das plataformas (sandbox) — deixe desmarcado para valer de verdade
@@ -242,5 +251,47 @@ export function ShippingSettings({ data, run }) {
       </div>
       <button className="btn-primary w-full py-3" disabled={busy}>{busy && <Spinner className="w-4 h-4" />} Salvar configurações de frete</button>
     </form>
+  );
+}
+
+// Cotação de teste: confere tokens e CEP sem precisar de cliente
+function TestQuote({ call, cats, enabled }) {
+  const [cep, setCep] = useState('');
+  const [category, setCategory] = useState('Photocards');
+  const [res, setRes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const test = async () => {
+    setBusy(true);
+    try {
+      setRes(await call('adminTestShippingQuote', { cep, category }));
+    } catch (err) {
+      setRes({ options: [], errors: [err.message], package: null });
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="rounded-xl border border-dashed border-purple-200 p-3 space-y-2">
+      <strong className="text-sm">🧪 Testar cotação</strong>
+      <p className="text-[11px] text-slate-500">Salve os tokens e o CEP de origem antes. O teste cota um item da categoria escolhida para o CEP de destino.</p>
+      <div className="flex flex-wrap gap-2">
+        <input value={cep} onChange={(e) => setCep(e.target.value)} inputMode="numeric" placeholder="CEP de destino" className="input py-1.5 w-36" />
+        <select value={category} onChange={(e) => setCategory(e.target.value)} className="input py-1.5 w-auto">
+          {cats.map((c) => <option key={c}>{c}</option>)}
+        </select>
+        <button type="button" disabled={busy || !enabled} onClick={test} className="btn-soft">
+          {busy && <Spinner className="w-3.5 h-3.5" />} Testar
+        </button>
+      </div>
+      {res && (
+        <div className="text-xs space-y-1">
+          {res.package && <p className="text-slate-500">Pacote: {res.package.kind} • {res.package.weight} kg • {res.package.height}x{res.package.width}x{res.package.length} cm</p>}
+          {res.options.map((o) => (
+            <p key={o.key}>✓ {o.company} {o.service} — <strong>{formatBRL(o.price)}</strong> {o.days ? `• ~${o.days} dias` : ''} <span className="text-slate-400">via {o.provider}</span></p>
+          ))}
+          {res.errors.map((e) => <p key={e} className="font-semibold text-rose-700">✗ {e}</p>)}
+          {!res.options.length && !res.errors.length && <p className="text-amber-700">Nenhuma opção para esse CEP.</p>}
+        </div>
+      )}
+    </div>
   );
 }
