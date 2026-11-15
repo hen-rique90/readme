@@ -365,3 +365,40 @@ test('conta: não dá para desfazer depois de pago', () => {
   admin('setChargeStatus', { chargeId: charge.chargeId, status: 'Pago' });
   assert.equal(api.call('cancelMyOrder', { token: reg.token, orderId: order.orderId }).ok, false);
 });
+
+test('anunciar por membro: um item por integrante, com estoque e foto próprios', () => {
+  const { api, admin } = freshBackend();
+  addProduct(admin); // CEG-01 já existe
+  const res = admin('saveProductBatch', {
+    product: { name: 'Photocard Golden POB', category: 'Photocards', price: 30, batch: 'CEG #50', image: 'https://x/geral.jpg', dueDate: '2026-12-15' },
+    variants: [
+      { member: 'Jimin', image: 'https://x/jimin.jpg' },
+      { member: 'V', totalStock: 2 },
+      { member: 'Jungkook' }
+    ]
+  });
+  assert.equal(res.ok, true, res.error);
+  assert.deepEqual(res.products.map((p) => p.id), ['CEG-02', 'CEG-03', 'CEG-04']);
+  const cat = api.call('catalog').products.filter((p) => p.batch === 'CEG #50');
+  assert.deepEqual(cat.map((p) => [p.name, p.member, p.totalStock, p.image, p.dueDate]), [
+    ['Photocard Golden POB — Jimin', 'Jimin', 1, 'https://x/jimin.jpg', '2026-12-15'],
+    ['Photocard Golden POB — V', 'V', 2, 'https://x/geral.jpg', '2026-12-15'],
+    ['Photocard Golden POB — Jungkook', 'Jungkook', 1, 'https://x/geral.jpg', '2026-12-15']
+  ]);
+  // um claim no item de 1 unidade esgota só aquele membro
+  assert.equal(api.call('claim', { ...buyer, productId: 'CEG-02', quantity: 1 }).ok, true);
+  assert.equal(api.call('claim', { ...buyer, productId: 'CEG-02', quantity: 1 }).ok, false);
+  assert.equal(api.call('claim', { ...buyer, productId: 'CEG-03', quantity: 1 }).ok, true);
+});
+
+test('anunciar por membro: dado inválido não cria nada pela metade', () => {
+  const { api, admin } = freshBackend();
+  const bad = admin('saveProductBatch', {
+    product: { name: 'Set', price: 30 },
+    variants: [{ member: 'RM' }, { member: 'Jin', totalStock: 0 }]
+  });
+  assert.equal(bad.ok, false);
+  assert.equal(admin('saveProductBatch', { product: { name: 'Set', price: 30 }, variants: [{ member: 'RM' }, { member: 'RM' }] }).ok, false);
+  assert.equal(admin('saveProductBatch', { product: { name: '', price: 30 }, variants: [{ member: 'RM' }] }).ok, false);
+  assert.equal(api.call('catalog').products.length, 0);
+});

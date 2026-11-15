@@ -98,6 +98,7 @@ var ADMIN_ACTIONS = {
   adminLogin: function () { return { ok: true }; },
   adminData: actionAdminData_,
   saveProduct: actionSaveProduct_,
+  saveProductBatch: actionSaveProductBatch_,
   deleteProduct: actionDeleteProduct_,
   setOrderStatus: actionSetOrderStatus_,
   setOrderNote: actionSetOrderNote_,
@@ -111,7 +112,7 @@ var ADMIN_ACTIONS = {
 
 // Ações que alteram a planilha e precisam da trava
 var WRITE_ACTIONS = {
-  claim: true, saveProduct: true, deleteProduct: true, setOrderStatus: true, setOrderNote: true,
+  claim: true, saveProduct: true, saveProductBatch: true, deleteProduct: true, setOrderStatus: true, setOrderNote: true,
   setChargeStatus: true, addCharge: true, addBatchCharge: true, deleteCharge: true, saveConfig: true,
   register: true, login: true, updateProfile: true, changePassword: true, updateMyOrder: true, cancelMyOrder: true,
   adminResetPassword: true
@@ -653,6 +654,27 @@ function actionSaveProduct_(params) {
   var existing = null;
   products.forEach(function (p) { if (p.id === id) existing = p; });
 
+  var product = productFromInput_(input, id);
+
+  if (input.isNew && existing) throw userError_('Já existe um produto com o código ' + id + '.');
+
+  if (existing) {
+    var sold = soldMap_(allOrders_())[id] || 0;
+    if (product.totalStock < sold) {
+      throw userError_('Já foram vendidas ' + sold + ' unidades. O estoque total não pode ser menor que isso.');
+    }
+    writeRow_('products', existing.rowNumber, productRow_(product));
+  } else {
+    if (!id) {
+      product.id = nextIds_(products, 1)[0];
+    }
+    if (product.totalStock < 1) throw userError_('O estoque inicial precisa ser pelo menos 1.');
+    appendRow_('products', productRow_(product));
+  }
+  return { ok: true, product: product };
+}
+
+function productFromInput_(input, id) {
   var product = {
     id: id,
     name: str_(input.name).slice(0, 150),
@@ -673,28 +695,49 @@ function actionSaveProduct_(params) {
   if (!product.name) throw userError_('Informe o nome do produto.');
   if (product.price <= 0) throw userError_('Informe um preço maior que zero.');
   if (product.totalStock < 0) throw userError_('Estoque inválido.');
+  return product;
+}
 
-  if (input.isNew && existing) throw userError_('Já existe um produto com o código ' + id + '.');
+// Próximos códigos livres no formato CEG-01, CEG-02...
+function nextIds_(products, count) {
+  var maxNum = 0;
+  products.forEach(function (p) {
+    var m = /^CEG-(\d+)$/.exec(p.id);
+    if (m) maxNum = Math.max(maxNum, Number(m[1]));
+  });
+  var ids = [];
+  for (var i = 1; i <= count; i++) ids.push('CEG-' + ('0' + (maxNum + i)).slice(-2));
+  return ids;
+}
 
-  if (existing) {
-    var sold = soldMap_(allOrders_())[id] || 0;
-    if (product.totalStock < sold) {
-      throw userError_('Já foram vendidas ' + sold + ' unidades. O estoque total não pode ser menor que isso.');
-    }
-    writeRow_('products', existing.rowNumber, productRow_(product));
-  } else {
-    if (!id) {
-      var maxNum = 0;
-      products.forEach(function (p) {
-        var m = /^CEG-(\d+)$/.exec(p.id);
-        if (m) maxNum = Math.max(maxNum, Number(m[1]));
-      });
-      product.id = 'CEG-' + ('0' + (maxNum + 1)).slice(-2);
-    }
-    if (product.totalStock < 1) throw userError_('O estoque inicial precisa ser pelo menos 1.');
-    appendRow_('products', productRow_(product));
-  }
-  return { ok: true, product: product };
+// "Anunciar por membro": um item por integrante, criados todos juntos (ou nenhum)
+function actionSaveProductBatch_(params) {
+  var base = params.product || {};
+  var variants = Array.isArray(params.variants) ? params.variants : [];
+  if (variants.length < 1) throw userError_('Escolha pelo menos um membro.');
+  if (variants.length > 20) throw userError_('Máximo de 20 itens por vez.');
+
+  var products = allProducts_();
+  var ids = nextIds_(products, variants.length);
+  var seenMember = {};
+  var created = variants.map(function (v, i) {
+    var member = str_(v.member);
+    if (!member) throw userError_('Membro inválido.');
+    if (seenMember[member]) throw userError_('O membro ' + member + ' foi escolhido duas vezes.');
+    seenMember[member] = true;
+    var input = {};
+    Object.keys(base).forEach(function (k) { input[k] = base[k]; });
+    input.member = member;
+    input.name = str_(base.name) + ' — ' + member;
+    input.image = str_(v.image) || str_(base.image);
+    input.totalStock = v.totalStock === undefined || v.totalStock === '' ? 1 : v.totalStock;
+    var product = productFromInput_(input, ids[i]);
+    if (!str_(base.name)) throw userError_('Informe o nome do produto.');
+    if (product.totalStock < 1) throw userError_('O estoque de ' + member + ' precisa ser pelo menos 1.');
+    return product;
+  });
+  created.forEach(function (p) { appendRow_('products', productRow_(p)); });
+  return { ok: true, products: created };
 }
 
 function actionDeleteProduct_(params) {

@@ -517,6 +517,8 @@ function BuyersTab({ data, run }) {
 
 // ---------------------------------------------------------------------------
 
+const BY_MEMBER = MEMBERS.filter((m) => m !== 'OT7');
+
 const EMPTY_PRODUCT = {
   id: '', name: '', member: 'OT7', category: 'Photocards', price: '', totalStock: 1, image: '', batch: '', active: true,
   dueDate: '', parcelado: false, installmentDates: ['', '']
@@ -527,10 +529,15 @@ function ProductsTab({ data, run }) {
   const [form, setForm] = useState({ ...EMPTY_PRODUCT, batch: lastBatch });
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [byMember, setByMember] = useState(false);
+  const [variants, setVariants] = useState({}); // { Jimin: { on, totalStock, image } }
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+  const chosen = BY_MEMBER.filter((m) => variants[m]?.on);
+  const setVariant = (m, patch) => setVariants({ ...variants, [m]: { totalStock: 1, image: '', ...variants[m], ...patch } });
 
   const reset = () => {
     setEditing(null);
+    setVariants({});
     setForm({ ...EMPTY_PRODUCT, batch: form.batch, dueDate: form.dueDate });
   };
 
@@ -547,6 +554,21 @@ function ProductsTab({ data, run }) {
       window.alert('Para o Pix parcelado, preencha pelo menos 2 datas.');
       return;
     }
+    if (byMember && !editing) {
+      if (!chosen.length) {
+        setSaving(false);
+        window.alert('Escolha pelo menos um membro.');
+        return;
+      }
+      const res = await run(
+        'saveProductBatch',
+        { product, variants: chosen.map((m) => ({ member: m, totalStock: variants[m].totalStock, image: variants[m].image })) },
+        (r) => `${r.products.length} itens adicionados (${r.products[0].id} a ${r.products[r.products.length - 1].id})!`
+      );
+      setSaving(false);
+      if (res) reset();
+      return;
+    }
     const res = await run('saveProduct', { product }, (r) => (editing ? 'Produto atualizado!' : `Item ${r.product.id} adicionado à CEG!`));
     setSaving(false);
     if (res) reset();
@@ -558,11 +580,32 @@ function ProductsTab({ data, run }) {
         <h3 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
           <Plus className="w-5 h-5 text-purple-600" /> {editing ? `Editando ${editing}` : 'Anunciar item'}
         </h3>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Código (opcional)</label>
-            <input value={form.id} disabled={!!editing} onChange={set('id')} placeholder="Automático" className="input disabled:bg-slate-50" />
+        {!editing && (
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-purple-50">
+            {[[false, 'Um item'], [true, 'Por membro']].map(([value, label]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setByMember(value)}
+                className={`py-2 rounded-lg text-sm font-bold ${byMember === value ? 'bg-white text-purple-800 shadow-sm' : 'text-purple-700'}`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          {byMember && !editing ? (
+            <div>
+              <label className="label">Código</label>
+              <div className="input bg-slate-50 text-slate-400">Automático</div>
+            </div>
+          ) : (
+            <div>
+              <label className="label">Código (opcional)</label>
+              <input value={form.id} disabled={!!editing} onChange={set('id')} placeholder="Automático" className="input disabled:bg-slate-50" />
+            </div>
+          )}
           <div>
             <label className="label">Lote / CEG</label>
             <input value={form.batch} onChange={set('batch')} placeholder="CEG #44 Weverse" className="input" list="batches" />
@@ -576,13 +619,15 @@ function ProductsTab({ data, run }) {
           <input required value={form.name} onChange={set('name')} placeholder="Photocard Jungkook Golden POB" className="input" />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Membro</label>
-            <select value={form.member} onChange={set('member')} className="input">
-              {[...new Set([...MEMBERS, form.member])].map((m) => <option key={m}>{m}</option>)}
-            </select>
-          </div>
-          <div>
+          {!(byMember && !editing) && (
+            <div>
+              <label className="label">Membro</label>
+              <select value={form.member} onChange={set('member')} className="input">
+                {[...new Set([...MEMBERS, form.member])].map((m) => <option key={m}>{m}</option>)}
+              </select>
+            </div>
+          )}
+          <div className={byMember && !editing ? 'col-span-2' : ''}>
             <label className="label">Categoria</label>
             <select value={form.category} onChange={set('category')} className="input">
               {[...new Set([...CATEGORIES, form.category])].map((c) => <option key={c}>{c}</option>)}
@@ -594,11 +639,68 @@ function ProductsTab({ data, run }) {
             <label className="label">Preço (R$) *</label>
             <input required type="number" step="0.01" min="0.01" value={form.price} onChange={set('price')} placeholder="95.00" className="input" />
           </div>
-          <div>
-            <label className="label">Quantidade total *</label>
-            <input required type="number" min="1" value={form.totalStock} onChange={set('totalStock')} className="input" />
-          </div>
+          {!(byMember && !editing) && (
+            <div>
+              <label className="label">Quantidade total *</label>
+              <input required type="number" min="1" value={form.totalStock} onChange={set('totalStock')} className="input" />
+            </div>
+          )}
         </div>
+        {byMember && !editing && (
+          <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50/40 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="label mb-0">Membros ({chosen.length})</span>
+              <button
+                type="button"
+                className="text-xs font-bold text-fuchsia-700 underline"
+                onClick={() => {
+                  const all = chosen.length < BY_MEMBER.length;
+                  const next = {};
+                  BY_MEMBER.forEach((m) => { next[m] = { totalStock: 1, image: '', ...variants[m], on: all }; });
+                  setVariants(next);
+                }}
+              >
+                {chosen.length < BY_MEMBER.length ? 'Marcar todos' : 'Desmarcar todos'}
+              </button>
+            </div>
+            {BY_MEMBER.map((m) => {
+              const v = variants[m] || {};
+              return (
+                <div key={m} className={`rounded-xl p-2 ${v.on ? 'bg-white border border-fuchsia-200' : ''}`}>
+                  <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer min-w-0">
+                    <input type="checkbox" checked={!!v.on} onChange={(e) => setVariant(m, { on: e.target.checked })} className="w-4 h-4 accent-fuchsia-600 shrink-0" />
+                    <span className="shrink-0">{m}</span>
+                    {v.on && form.name && <span className="text-[11px] font-medium text-slate-400 truncate">→ {form.name} — {m}</span>}
+                  </label>
+                  {v.on && (
+                    <div className="grid grid-cols-[4.5rem_1fr] gap-2 mt-2">
+                      <input
+                        type="number"
+                        min="1"
+                        value={v.totalStock ?? 1}
+                        onChange={(e) => setVariant(m, { totalStock: e.target.value })}
+                        className="input py-1.5"
+                        aria-label={`Quantidade de ${m}`}
+                        title="Quantidade"
+                      />
+                      <input
+                        type="url"
+                        value={v.image || ''}
+                        onChange={(e) => setVariant(m, { image: e.target.value })}
+                        placeholder="Foto deste membro (opcional)"
+                        className="input py-1.5"
+                        aria-label={`Foto de ${m}`}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <p className="text-[11px] text-slate-500">
+              Cada membro vira um item separado (quantidade 1 por padrão). Sem foto própria, usa a foto geral abaixo.
+            </p>
+          </div>
+        )}
         <div className="rounded-2xl border border-purple-100 bg-purple-50/40 p-3 space-y-3">
           <div>
             <label className="label">Prazo para pagamento (Pix à vista)</label>
@@ -626,7 +728,7 @@ function ProductsTab({ data, run }) {
           )}
         </div>
         <div>
-          <label className="label">Link da foto</label>
+          <label className="label">{byMember && !editing ? 'Foto geral (opcional)' : 'Link da foto'}</label>
           <input type="url" value={form.image} onChange={set('image')} placeholder="https://..." className="input" />
           {form.image && (
             <div className="mt-2 flex items-center gap-3">
@@ -644,7 +746,8 @@ function ProductsTab({ data, run }) {
         </div>
         <div className="flex gap-2 pt-1">
           <button className="btn-primary flex-1 py-3" disabled={saving}>
-            {saving && <Spinner className="w-4 h-4" />} {editing ? 'Salvar alterações' : 'Publicar na CEG'}
+            {saving && <Spinner className="w-4 h-4" />}{' '}
+            {editing ? 'Salvar alterações' : byMember ? `Publicar ${chosen.length} itens na CEG` : 'Publicar na CEG'}
           </button>
           {editing && <button type="button" onClick={reset} className="btn-soft px-4">Cancelar</button>}
         </div>
