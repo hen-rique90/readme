@@ -182,22 +182,29 @@ export default function ClaimModal({ product, config, onClose, onClaimed, onView
         </div>
         <div>
           <label className="label">Pagamento</label>
-          <div className="space-y-2">
-            <PlanOption
-              checked={form.paymentPlan === 'avista' || !canSplit}
-              onChange={() => setForm({ ...form, paymentPlan: 'avista' })}
-              title={`Pix à vista — ${formatBRL(total)}`}
-              detail={product.dueDate ? `Pagar até ${formatDay(product.dueDate)}` : 'Pagar após o claim'}
-            />
-            {canSplit && (
+          {canSplit ? (
+            <div className="space-y-2">
+              <PlanOption
+                checked={form.paymentPlan === 'avista'}
+                onChange={() => setForm({ ...form, paymentPlan: 'avista' })}
+                title={`Pix à vista — ${formatBRL(total)}`}
+                detail={product.dueDate ? `Pagar até ${formatDay(product.dueDate)}` : 'Pagar após o claim'}
+              />
               <PlanOption
                 checked={form.paymentPlan === 'parcelado'}
                 onChange={() => setForm({ ...form, paymentPlan: 'parcelado' })}
                 title={`Pix parcelado — ${installments.length}x de ${formatBRL(parts[0])}`}
                 detail={installments.map((d, i) => `${formatDayShort(d)} (${formatBRL(parts[i])})`).join(' • ')}
               />
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="px-3.5 py-2.5 rounded-xl bg-purple-50 text-sm">
+              <span className="font-bold text-slate-800">Pix à vista — {formatBRL(total)}</span>
+              <span className="block text-[11px] text-slate-500">
+                {product.dueDate ? `Pagar até ${formatDay(product.dueDate)}` : 'Pagar após o claim'}
+              </span>
+            </div>
+          )}
         </div>
         <div>
           <label className="label">Envio</label>
