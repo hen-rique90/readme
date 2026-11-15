@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { KeyRound, LogOut, Phone, UserRound } from 'lucide-react';
 import { api, IS_DEMO } from '../api';
 import { formatPhone, loadBuyer, saveBuyer, waLink } from '../utils';
 import { Modal, PhoneInput, Spinner } from './common';
+import { AddressForm, addressLine } from './ShippingTools';
 
 // mode: 'login' | 'register' | 'account' | 'changePassword'
 export default function AuthModal({ initialMode = 'login', reason, config, session, onClose, onSession, onLogout, showToast }) {
@@ -241,6 +242,8 @@ export default function AuthModal({ initialMode = 'login', reason, config, sessi
         </form>
       )}
 
+      {mode === 'account' && session && <AddressBook session={session} />}
+
       {mode === 'changePassword' && session && (
         <form onSubmit={changePassword} className="space-y-3">
           <div className="pr-8">
@@ -261,5 +264,48 @@ export default function AuthModal({ initialMode = 'login', reason, config, sessi
         </form>
       )}
     </Modal>
+  );
+}
+
+function AddressBook({ session }) {
+  const [list, setList] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api('myAddresses', { token: session.token }).then((r) => setList(r.addresses)).catch((err) => setError(err.message));
+  }, [session.token]);
+  const remove = async (a) => {
+    if (!window.confirm(`Apagar o endereço "${a.label}"?`)) return;
+    try {
+      setList((await api('deleteAddress', { token: session.token, addressId: a.addressId })).addresses);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  return (
+    <div className="mt-4 pt-4 border-t border-purple-100 space-y-2">
+      <h4 className="font-extrabold text-slate-800 text-sm">📍 Meus endereços</h4>
+      {!list && !error && <Spinner className="w-4 h-4 text-purple-600" />}
+      {list?.length === 0 && !adding && <p className="text-xs text-slate-500">Nenhum endereço ainda.</p>}
+      {list?.map((a) => (
+        <div key={a.addressId} className="flex items-start justify-between gap-2 text-xs bg-slate-50 rounded-xl p-2.5">
+          <span><strong>{a.label}</strong> — {a.recipient}<span className="block text-slate-500">{addressLine(a)}</span></span>
+          <button type="button" onClick={() => remove(a)} className="text-rose-600 font-bold shrink-0">Apagar</button>
+        </div>
+      ))}
+      {adding ? (
+        <AddressForm
+          token={session.token}
+          defaultRecipient={session.profile.name}
+          onSaved={(r) => { setList(r.addresses); setAdding(false); }}
+          onCancel={() => setAdding(false)}
+        />
+      ) : (
+        list && list.length < 5 && (
+          <button type="button" onClick={() => setAdding(true)} className="btn-soft w-full">+ Novo endereço</button>
+        )
+      )}
+      {error && <p className="text-xs text-rose-700">{error}</p>}
+    </div>
   );
 }

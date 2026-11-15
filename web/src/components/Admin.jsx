@@ -15,6 +15,7 @@ import RemindersTab from './RemindersTab';
 import { EditBuyerModal, MergeBuyerModal, SameNamePanel } from './BuyerTools';
 import { SplitOrderModal } from './OrderTools';
 import RequestsTab from './RequestsTab';
+import ShipmentsTab, { ShippingSettings } from './ShipmentsTab';
 
 const PASS_KEY = 'ceg_adm_senha';
 const CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
@@ -92,9 +93,11 @@ export default function Admin({ showToast, onCatalogChange }) {
   const conflicts = phoneConflicts(data.orders, data.clients).filter((c) => c.severity === 'diferente').length;
 
   const pendingRequests = (data.requests || []).filter((r) => r.status === 'Pendente').length;
+  const openShipments = (data.shipments || []).filter((x) => x.status !== 'Enviado' && x.status !== 'Cancelado').length;
   const tabs = [
     ['orders', ReceiptText, `Pedidos (${data.orders.length})`],
     ['requests', Inbox, `Solicitações${pendingRequests ? ` (${pendingRequests})` : ''}`],
+    ['shipments', Truck, `Envios${openShipments ? ` (${openShipments})` : ''}`],
     ['reminders', BellRing, `Cobranças do dia${dueNow ? ` (${dueNow})` : ''}`],
     ['sale', ShoppingCart, 'Registrar venda'],
     ['buyers', Users, `Compradoras${conflicts ? ` ⚠️${conflicts}` : ''}`],
@@ -152,6 +155,7 @@ export default function Admin({ showToast, onCatalogChange }) {
         />
       )}
       {tab === 'sale' && <SaleTab data={data} run={run} />}
+      {tab === 'shipments' && <ShipmentsTab data={data} run={run} />}
       {tab === 'requests' && (
         <RequestsTab
           data={data}
@@ -165,7 +169,12 @@ export default function Admin({ showToast, onCatalogChange }) {
       {tab === 'reminders' && <RemindersTab call={call} run={run} showToast={showToast} />}
       {tab === 'products' && <ProductsTab data={data} run={run} />}
       {tab === 'batch' && <BatchChargeTab data={data} run={run} />}
-      {tab === 'settings' && <SettingsTab data={data} run={run} />}
+      {tab === 'settings' && (
+        <div className="space-y-5">
+          <SettingsTab data={data} run={run} />
+          <ShippingSettings key={JSON.stringify(data.config.shipping || {})} data={data} run={run} />
+        </div>
+      )}
     </main>
   );
 }

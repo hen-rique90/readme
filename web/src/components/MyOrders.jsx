@@ -4,6 +4,7 @@ import { api, IS_DEMO } from '../api';
 import { chargeStatusColor, formatBRL, formatDate, formatDay, formatPhone, isOverdue, loadBuyer, orderStatusColor, saveBuyer, waLink } from '../utils';
 import { Badge, DueBadge, PhoneInput, PixBox, ProductImage, Spinner } from './common';
 import OrderRequests from './OrderRequests';
+import { ShippingPanel } from './ShippingTools';
 
 // Respostas da loja que a cliente ainda não viu (guardado só neste aparelho)
 const SEEN_KEY = 'ceg_respostas_vistas';
@@ -15,7 +16,7 @@ const readSeen = () => {
   }
 };
 
-export default function MyOrders({ config, session, onLogin, onSessionExpired }) {
+export default function MyOrders({ config, session, onLogin, onSessionExpired, showToast }) {
   const remembered = loadBuyer();
   const [whatsapp, setWhatsapp] = useState(remembered.whatsapp || '');
   const [code, setCode] = useState(remembered.lastCode || '');
@@ -224,6 +225,17 @@ export default function MyOrders({ config, session, onLogin, onSessionExpired })
       )}
 
       <div className="space-y-3">
+        {token && (
+          <ShippingPanel
+            orders={orders}
+            shipments={data.shipments || []}
+            token={token}
+            profile={session?.profile}
+            onChanged={() => lookup()}
+            onSessionExpired={onSessionExpired}
+            showToast={showToast}
+          />
+        )}
         <h3 className="font-extrabold text-slate-800">Meus itens ({orders.length} pedido(s))</h3>
         {orders.length === 0 && (
           <div className="card p-8 text-center text-sm text-slate-500">Você ainda não tem pedidos. Seus claims vão aparecer aqui. 💜</div>

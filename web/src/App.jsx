@@ -193,6 +193,7 @@ export default function App() {
             logout();
             setAuth({ mode: 'login', reason: 'Sua sessão expirou. Entre de novo.' });
           }}
+          showToast={showToast}
         />
       )}
       {tab === 'admin' && <Admin showToast={showToast} onCatalogChange={loadCatalog} />}
