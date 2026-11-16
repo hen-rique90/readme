@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { KeyRound, LogOut, Phone, UserRound } from 'lucide-react';
 import { api, IS_DEMO } from '../api';
-import { formatPhone, loadBuyer, saveBuyer, waLink } from '../utils';
+import { formatPhone, loadBuyer, normalizeOrderCode, saveBuyer, waLink } from '../utils';
 import { Modal, PhoneInput, Spinner } from './common';
 import { AddressForm, addressLine } from './ShippingTools';
 
@@ -64,7 +64,7 @@ export default function AuthModal({ initialMode = 'login', reason, config, sessi
           contact: form.contact,
           whatsapp: form.whatsapp,
           password: form.password,
-          code: needsCode ? form.code : ''
+          code: needsCode ? normalizeOrderCode(form.code) : ''
         }),
         'Conta criada! Agora é só dar claim 💜'
       )

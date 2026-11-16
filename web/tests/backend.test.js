@@ -1023,3 +1023,15 @@ test('mesmo WhatsApp: nome corrigido pela ADM vale para todos os pedidos do núm
   assert.equal(sale.ok, true, sale.error);
   assert.equal(admin('adminData').orders.find((o) => o.orderId === sale.order.orderId).buyerName, 'Kai Souza');
 });
+
+test('código do pedido: aceita traço do celular, espaço, minúscula e sem PED', () => {
+  const { api, admin } = freshBackend();
+  const id = addProduct(admin).id;
+  const c = api.call('claim', { productId: id, quantity: 1, buyerName: 'Ana', contact: '@ana', whatsapp: '47997702807' });
+  const rest = c.order.orderId.slice(4);
+  ['PED–' + rest, 'PED—' + rest, 'ped ' + rest.toLowerCase(), rest, ' PED-' + rest + ' '].forEach((code) => {
+    const r = api.call('myOrders', { whatsapp: '(47) 99770-2807', code });
+    assert.equal(r.ok, true, code + ': ' + r.error);
+  });
+  assert.equal(api.call('myOrders', { whatsapp: '47997702807', code: 'PED-ZZZZZZ' }).ok, false);
+});

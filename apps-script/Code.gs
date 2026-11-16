@@ -1026,10 +1026,10 @@ function actionSaveConfig_(params) {
 var SESSION_DAYS = 180;
 var UNDO_MINUTES = 15;
 
+// Aceita "PED-ABC123", "PED–ABC123" (traço do celular), "ped abc123" ou só "ABC123"
 function normalizeCode_(v) {
-  var code = str_(v).toUpperCase().replace(/\s/g, '');
-  if (code && code.indexOf('PED-') !== 0) code = 'PED-' + code;
-  return code;
+  var code = str_(v).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^PED/, '');
+  return code ? 'PED-' + code : '';
 }
 
 function b64_(bytes) {
