@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock, LogOut, Package, Phone, ReceiptText } from 'lucide-react';
 import { api, IS_DEMO } from '../api';
-import { chargeStatusColor, formatBRL, formatDate, formatDay, formatPhone, isOverdue, loadBuyer, orderStatusColor, saveBuyer, waLink } from '../utils';
+import { chargeStatusColor, formatBRL, formatDate, formatDay, formatPhone, isOverdue, loadBuyer, normalizeOrderCode, orderStatusColor, saveBuyer, waLink } from '../utils';
 import { Badge, DueBadge, PhoneInput, PixBox, ProductImage, Spinner } from './common';
 import OrderRequests from './OrderRequests';
 import { ShippingPanel } from './ShippingTools';
@@ -30,7 +30,7 @@ export default function MyOrders({ config, session, onLogin, onSessionExpired, s
     setLoading(true);
     setError('');
     try {
-      const res = token ? await api('myOrders', { token }) : await api('myOrders', { whatsapp: w, code: c });
+      const res = token ? await api('myOrders', { token }) : await api('myOrders', { whatsapp: w, code: normalizeOrderCode(c) });
       setData(res);
       if (!token && res.buyer) {
         saveBuyer({ whatsapp: res.buyer.whatsapp, lastCode: c.toUpperCase().startsWith('PED-') ? c.toUpperCase() : `PED-${c.toUpperCase()}` });

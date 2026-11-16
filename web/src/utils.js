@@ -121,6 +121,12 @@ export const downloadCSV = (filename, headers, rows) => {
   URL.revokeObjectURL(url);
 };
 
+// Código do pedido: aceita qualquer traço/espaço e o código sem "PED"
+export const normalizeOrderCode = (v) => {
+  const code = String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^PED/, '');
+  return code ? `PED-${code}` : '';
+};
+
 // Converte links de página (Google Drive, Imgur) em links diretos de imagem.
 // Devolve uma lista de tentativas: se a primeira não carregar, tenta a próxima.
 export const imageCandidates = (raw) => {
