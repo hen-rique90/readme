@@ -109,7 +109,7 @@ export default function Admin({ showToast, onCatalogChange }) {
     ['sale', ShoppingCart, 'Registrar venda'],
     ['buyers', Users, `Compradoras${conflicts ? ` ⚠️${conflicts}` : ''}`],
     ['products', Package, `Produtos (${data.products.length})`],
-    ['batch', Truck, 'Cobrar frete do lote'],
+    ['batch', Truck, 'Cobrar frete/taxa do lote'],
     ['settings', Settings, 'Configurações']
   ];
 
@@ -589,6 +589,15 @@ function OrderDetails({ order, charges, run, onTransferred, group, productImage 
             }}
           >
             <h4 className="font-extrabold text-slate-800 text-sm">Adicionar cobrança</h4>
+            <div className="flex flex-wrap gap-1.5">
+              {['Frete', 'Taxa alfândega', 'Valor do item'].map((d) => (
+                <button key={d} type="button" onClick={() => setDesc(d)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${desc === d ? 'bg-purple-700 text-white border-purple-700' : 'bg-purple-50 text-purple-800 border-purple-100'}`}>
+                  {d}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400">Na consulta, cobranças com "frete" vão para a coluna Frete; com "alfândega" ou "taxa", para Alfândega; o resto, para o Item.</p>
             <div className="flex gap-2">
               <input value={desc} onChange={(e) => setDesc(e.target.value)} required placeholder="Ex: Frete nacional" className="input flex-1" />
               <input value={amount} onChange={(e) => setAmount(e.target.value)} required type="number" step="0.01" min="0.01" placeholder="R$" className="input w-28" />

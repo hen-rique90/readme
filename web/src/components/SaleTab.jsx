@@ -12,7 +12,8 @@ const EMPTY = {
   source: 'free', productId: '', useStock: true,
   productName: '', image: '', group: DEFAULT_GROUP, otherGroup: false, member: 'OT7', category: 'Photocards', batch: '',
   quantity: 1, unitPrice: '', date: todayKey(), status: 'Comprado', shipping: '',
-  mode: 'avista', paid: false, dueDate: '', installmentDates: ['', ''], paidInstallments: 0, note: ''
+  mode: 'avista', paid: false, dueDate: '', installmentDates: ['', ''], paidInstallments: 0, note: '',
+  freteValue: '', fretePaid: false, alfValue: '', alfPaid: false
 };
 
 // Registrar uma venda feita fora do site (ou antes do sistema existir)
@@ -40,9 +41,12 @@ export default function SaleTab({ data, run }) {
   const product = data.products.find((p) => p.id === form.productId);
   const group = form.group.trim();
   const known = !form.otherGroup && !!GROUPS[group];
-  const total = (Number(form.unitPrice) || 0) * (Number(form.quantity) || 0);
+  const itemTotal = (Number(form.unitPrice) || 0) * (Number(form.quantity) || 0);
+  const frete = Number(form.freteValue) || 0;
+  const alf = Number(form.alfValue) || 0;
+  const total = itemTotal + frete + alf;
   const dates = form.installmentDates.filter(Boolean);
-  const parts = splitInstallments(total, dates.length);
+  const parts = splitInstallments(itemTotal, dates.length);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -57,6 +61,10 @@ export default function SaleTab({ data, run }) {
       shipping: form.shipping,
       batch: form.batch,
       note: form.note,
+      extras: [
+        { kind: 'frete', amount: form.freteValue, paid: form.fretePaid },
+        { kind: 'alfandega', amount: form.alfValue, paid: form.alfPaid }
+      ],
       payment:
         form.mode === 'parcelado'
           ? { mode: 'parcelado', installmentDates: dates, paidInstallments: Number(form.paidInstallments) }
@@ -76,9 +84,9 @@ export default function SaleTab({ data, run }) {
     }
   };
 
-  const paidSoFar = form.mode === 'parcelado'
+  const paidSoFar = (form.mode === 'parcelado'
     ? parts.slice(0, Number(form.paidInstallments)).reduce((a, v) => a + v, 0)
-    : form.paid ? total : 0;
+    : form.paid ? itemTotal : 0) + (form.fretePaid ? frete : 0) + (form.alfPaid ? alf : 0);
 
   return (
     <div className="grid lg:grid-cols-3 gap-5">
@@ -87,7 +95,7 @@ export default function SaleTab({ data, run }) {
           <h3 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
             <ShoppingCart className="w-5 h-5 text-purple-600" /> Registrar venda
           </h3>
-          <p className="text-xs text-slate-500">Para vendas feitas no WhatsApp, em grupo ou antes do site. A cliente vê tudo em "Meus Pedidos".</p>
+          <p className="text-xs text-slate-500">A cliente vê tudo na consulta pelo telefone: CEG → SET → item, com o pagamento do item, do frete e da alfândega.</p>
         </div>
 
         <Section title="1. Compradora">
@@ -106,7 +114,7 @@ export default function SaleTab({ data, run }) {
               <input value={form.contact} onChange={set('contact')} placeholder="@user" className="input" />
             </div>
           </div>
-          {!form.whatsapp && <p className="text-[11px] text-amber-700">Sem WhatsApp a cliente não consegue ver o pedido em "Meus Pedidos".</p>}
+          {!form.whatsapp && <p className="text-[11px] text-amber-700">Sem o telefone a cliente não consegue consultar o pedido.</p>}
           {owner && form.name && !sameFirstName(owner.name, form.name) && (
             <p className="text-xs font-semibold text-rose-700 bg-rose-50 rounded-xl px-3 py-2">
               ⚠️ Esse WhatsApp já é de <strong>{owner.name}</strong>. Se a venda é de outra pessoa, use o WhatsApp dela — senão as duas
@@ -146,8 +154,8 @@ export default function SaleTab({ data, run }) {
           ) : (
             <>
               <div>
-                <label className="label">Nome do produto *</label>
-                <input required value={form.productName} onChange={set('productName')} placeholder="Ex: DVD Arirang Japão - Set completo" className="input" />
+                <label className="label">SET (nome do produto) *</label>
+                <input required value={form.productName} onChange={set('productName')} placeholder="Ex: Album Arirang - Target Korea vers." className="input" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -163,7 +171,7 @@ export default function SaleTab({ data, run }) {
                   {!known && <input required value={form.group} onChange={set('group')} placeholder="Nome do grupo" className="input mt-2" />}
                 </div>
                 <div>
-                  <label className="label">Membro</label>
+                  <label className="label">Item (membro)</label>
                   {known ? (
                     <select value={form.member} onChange={set('member')} className="input">
                       {[wholeGroupLabel(group), ...membersOf(group)].map((m) => <option key={m}>{m}</option>)}
@@ -181,9 +189,9 @@ export default function SaleTab({ data, run }) {
                   </select>
                 </div>
                 <div>
-                  <label className="label">Lote / CEG</label>
-                  <input value={form.batch} onChange={set('batch')} list="sale-batches" placeholder="Ex: Caixa 4" className="input" />
-                  <datalist id="sale-batches">{[...new Set(data.products.map((p) => p.batch))].map((b) => <option key={b} value={b} />)}</datalist>
+                  <label className="label">CEG *</label>
+                  <input required value={form.batch} onChange={set('batch')} list="sale-batches" placeholder="Ex: CEG EUA - Album Arirang" className="input" />
+                  <datalist id="sale-batches">{[...new Set([...data.orders.map((o) => o.batch), ...data.products.map((p) => p.batch)].filter(Boolean))].map((b) => <option key={b} value={b} />)}</datalist>
                 </div>
               </div>
               <div>
@@ -202,7 +210,7 @@ export default function SaleTab({ data, run }) {
               <input type="number" min="1" required value={form.quantity} onChange={set('quantity')} className="input" />
             </div>
             <div>
-              <label className="label">Valor unitário (R$) *</label>
+              <label className="label">Valor do item (R$) *</label>
               <input type="number" step="0.01" min="0.01" required value={form.unitPrice} onChange={set('unitPrice')} className="input" />
             </div>
             <div>
@@ -260,10 +268,28 @@ export default function SaleTab({ data, run }) {
           )}
         </Section>
 
-        <Section title="4. Detalhes (opcional)">
+        <Section title="4. Frete e alfândega (opcional)">
+          {[['frete', 'Valor do frete (R$)', 'freteValue', 'fretePaid'], ['alf', 'Taxa da alfândega (R$)', 'alfValue', 'alfPaid']].map(([k, label, v, paid]) => (
+            <div key={k} className="grid grid-cols-2 gap-3 items-end">
+              <div>
+                <label className="label">{label}</label>
+                <input type="number" step="0.01" min="0" value={form[v]} onChange={set(v)} placeholder="Deixe vazio se ainda não tem" className="input" />
+              </div>
+              {Number(form[v]) > 0 && (
+                <label className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 text-sm font-bold text-emerald-900 cursor-pointer">
+                  <input type="checkbox" checked={form[paid]} onChange={set(paid)} className="w-4 h-4 accent-emerald-600" />
+                  Já está pago
+                </label>
+              )}
+            </div>
+          ))}
+          <p className="text-[11px] text-slate-500">Dá para lançar depois: no pedido (ADM → Pedidos → ▾ → nova cobrança "Frete" ou "Taxa alfândega") ou para o lote inteiro em "Cobrar frete do lote".</p>
+        </Section>
+
+        <Section title="5. Andamento e observações (opcional)">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Status do pedido</label>
+              <label className="label">Andamento</label>
               <select value={form.status} onChange={set('status')} className="input">
                 {data.config.orderStatuses.filter((s) => s !== 'Cancelado').map((s) => <option key={s}>{s}</option>)}
               </select>
@@ -276,7 +302,7 @@ export default function SaleTab({ data, run }) {
             </div>
           </div>
           <div>
-            <label className="label">Observação para a cliente</label>
+            <label className="label">Observações (a cliente vê)</label>
             <input value={form.note} onChange={set('note')} maxLength={300} placeholder="Ex: venda feita no grupo do WhatsApp" className="input" />
           </div>
         </Section>
@@ -300,7 +326,7 @@ export default function SaleTab({ data, run }) {
             </p>
             {done.order.whatsapp && (
               <a
-                href={waLink(done.order.whatsapp, `Oii ${done.order.buyerName.split(' ')[0]}! 💜 Registramos sua compra na CEG: ${done.order.quantity}x ${done.order.productName} (${formatBRL(done.order.itemTotal)}).\nVocê acompanha pagamentos e prazos em "Meus Pedidos" no site. Para criar sua conta, use seu WhatsApp e o código ${done.order.orderId}.`)}
+                href={waLink(done.order.whatsapp, `Oii ${done.order.buyerName.split(' ')[0]}! 💜 Registramos sua compra na CEG: ${done.order.quantity}x ${done.order.productName} (${formatBRL(done.order.itemTotal)}).\nVocê acompanha pagamentos e andamento consultando pelo seu telefone: ${window.location.origin}${window.location.pathname}`)}
                 target="_blank" rel="noreferrer"
                 className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2"
               >

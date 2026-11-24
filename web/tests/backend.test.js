@@ -1035,3 +1035,40 @@ test('código do pedido: aceita traço do celular, espaço, minúscula e sem PED
   });
   assert.equal(api.call('myOrders', { whatsapp: '47997702807', code: 'PED-ZZZZZZ' }).ok, false);
 });
+
+test('consulta pelo telefone: CEG → SET → item com item, frete e alfândega', () => {
+  const { api, admin } = freshBackend();
+  const sale = (member, extras, paid = true) => admin('adminCreateSale', {
+    buyer: { name: 'Angy', whatsapp: '(65) 9 9246-6554' },
+    product: { name: 'Album Arirang - Target Korea vers. — ' + member, member, category: 'Álbuns' },
+    batch: 'CEG EUA - Album Arirang', unitPrice: 30, status: 'Comprado', note: 'chega em dezembro',
+    payment: { mode: 'avista', paid }, extras
+  });
+  assert.equal(sale('Jin', [{ kind: 'frete', amount: 7.5, paid: true }]).ok, true);
+  const s2 = sale('Jimin', [{ kind: 'frete', amount: 7.5, paid: false, dueDate: '2026-12-10' }, { kind: 'alfandega', amount: 12, paid: false }], false);
+  assert.equal(s2.charges.length, 3);
+  admin('addCharge', { orderId: s2.order.orderId, description: 'Frete internacional', amount: 5 });
+  // outra pessoa e pedido cancelado não aparecem
+  admin('adminCreateSale', { buyer: { name: 'Outra', whatsapp: '11999990000' }, product: { name: 'X' }, unitPrice: 10, payment: { mode: 'avista' } });
+
+  assert.match(api.call('consultaTelefone', { whatsapp: '6592' }).error, /DDD/);
+  const r = api.call('consultaTelefone', { whatsapp: '+55 (65) 99246-6554' });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.buyer.name, 'Angy');
+  assert.equal(r.items.length, 2);
+  const [jin, jimin] = r.items;
+  assert.deepEqual(
+    [jin.ceg, jin.set, jin.item, jin.valorItem, jin.pgtoItem, jin.valorFrete, jin.pgtoFrete, jin.taxaAlfandega, jin.pgtoAlfandega, jin.andamento, jin.observacoes],
+    ['CEG EUA - Album Arirang', 'Album Arirang - Target Korea vers.', 'Jin', 30, 'Pago', 7.5, 'Pago', '', '', 'Comprado', 'chega em dezembro']
+  );
+  assert.equal(jimin.valorFrete, 12.5); // frete + frete internacional
+  assert.equal(jimin.pgtoFrete, 'Pendente');
+  assert.equal(jimin.taxaAlfandega, 12);
+  assert.equal(jimin.pgtoItem, 'Pendente');
+  assert.equal(jimin.vencimento, '2026-12-10');
+  assert.deepEqual(r.totals, { owed: 54.5, paid: 37.5 });
+  assert.equal(r.config.pixKey !== undefined, true);
+  admin('setOrderStatus', { orderId: s2.order.orderId, status: 'Cancelado' });
+  assert.equal(api.call('consultaTelefone', { whatsapp: '65992466554' }).items.length, 1);
+  assert.equal(api.call('consultaTelefone', { whatsapp: '65900000000' }).buyer, null);
+});

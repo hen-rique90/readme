@@ -1,25 +1,31 @@
-# 💜 CEG K-pop — Sistema de Claims
+# 💜 Central de Compras CEGS
 
-Ferramenta para anunciar os produtos da CEG. A compradora faz o claim e o item fica **reservado no nome dela na hora**. Depois ela acompanha o que **comprou**, o que **já pagou** e o que **ainda deve**.
+A loja **registra as vendas** no painel ADM, com foto, dados da compradora, valor do item, frete, taxa da alfândega e o que já foi pago. A compradora **digita o telefone** no site e vê tudo, organizado por **CEG → SET → item**:
 
-- **Sem dados de cartão.** O pagamento é por Pix, fora do sistema. O site só mostra a chave Pix e um botão para mandar o comprovante no WhatsApp.
-- **Os dados ficam numa Planilha Google sua.** Você pode abrir, filtrar e editar à vontade.
-- **Custo zero.** Usa Google Apps Script (grátis) e um site estático (GitHub Pages, Netlify ou Vercel, todos grátis).
+| Item | Valor Item | Pgto Item | Valor Frete | Pgto Frete | Taxa Alfândega | Pgto Alfândega | Andamento | Observações |
+|---|---|---|---|---|---|---|---|---|
 
-## Como funciona
+- **Sem dados de cartão.** O pagamento é por Pix, fora do sistema. O site mostra a chave Pix e um botão para mandar o comprovante no WhatsApp.
+- **Os dados ficam numa Planilha Google sua.**
+- **Custo zero.** Google Apps Script + GitHub Pages.
 
-| Quem | O que faz |
-|---|---|
-| **Compradora** | Vê o catálogo com estoque em tempo real → faz o claim (nome, @, WhatsApp) → recebe um **código do pedido** + chave Pix → manda o comprovante no WhatsApp |
-| **Compradora** | Em **Meus Pedidos**, entra com WhatsApp + código e vê: *Falta pagar*, *Já pago*, *Itens comprados* e o status de cada item |
-| **ADM** | Anuncia produtos, marca pagamentos como pagos, muda o status (Comprado → A caminho → Na bag → Enviado…), lança **frete por lote** e cobra quem está devendo pelo WhatsApp |
-
-### Regras que o sistema garante
-- **Nunca vende o mesmo item duas vezes.** O estoque é conferido no servidor, com trava, no momento do claim.
-- **Nunca apaga pedidos.** Cada claim acrescenta uma linha na planilha.
-- **Estoque sempre certo.** O disponível é calculado a partir dos pedidos. Se um pedido for cancelado, o item volta sozinho para o catálogo.
-- **Privacidade.** Cada compradora só vê os próprios pedidos (WhatsApp + código). O painel ADM exige senha.
-- **Cobranças em fases.** Ao fazer o claim, é criada a cobrança da *1ª fase* (valor do item). Fretes e taxas são lançados depois, por pedido ou para o lote inteiro.
+## Como usar
+- **ADM → Registrar venda:**
+  - compradora (nome, WhatsApp, @);
+  - **CEG**, **SET** (nome do produto), **Item** (membro), foto (📷 Enviar foto ou link);
+  - valor do item: à vista, pago ou pendente, ou Pix parcelado;
+  - **frete** e **taxa da alfândega**, cada um com "já pago";
+  - andamento e observações.
+- **Depois:**
+  - em ADM → Pedidos → ▾, marque cada cobrança como **Pago**, adicione "Frete" ou "Taxa alfândega", mude o andamento e a observação;
+  - para o lote inteiro, use **Cobrar frete/taxa do lote**.
+- **Na consulta pelo telefone:**
+  - cobranças com "frete" vão para a coluna Frete;
+  - com "alfândega" ou "taxa", vão para a coluna Alfândega;
+  - o resto vai para o Item;
+  - o status é 🟢 Pago, 🟡 Parcial ou 🔴 Pendente, com o vencimento.
+- **Acesso:** a compradora só digita o telefone, sem senha e sem código. Quem souber o número consegue ver as compras daquele telefone.
+- O painel ADM fica em `seu-site/#adm`, com um link discreto "Área da ADM" no rodapé.
 
 ## Contas das compradoras
 - A compradora cria a conta com **nome, @, WhatsApp e senha** e fica logada no aparelho por 6 meses.
