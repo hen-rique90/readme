@@ -45,8 +45,8 @@ export default function App() {
   }, [loadConfig]);
 
   useEffect(() => {
-    document.title = tab === 'admin' ? `ADM — ${config?.storeName || 'CEGS'}` : 'Central de Compras CEGS';
-  }, [tab, config?.storeName]);
+    document.title = tab === 'admin' ? 'ADM — Cantinho da Army' : 'Cantinho da Army';
+  }, [tab]);
 
   return (
     <div className="min-h-screen bg-[#F4F6FB] text-[#2F2F2F] pb-16">

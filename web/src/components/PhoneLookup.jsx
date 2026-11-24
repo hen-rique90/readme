@@ -85,7 +85,7 @@ export default function PhoneLookup() {
     <main className="max-w-[1250px] mx-auto px-3 sm:px-6 pt-6 space-y-6">
       <form onSubmit={consultar} className="bg-white rounded-[18px] shadow-[0_8px_25px_rgba(0,0,0,.08)] p-6 sm:p-9">
         <h1 className="text-center text-3xl sm:text-[38px] font-bold text-[#5B5BD6] mb-6 sm:mb-7 leading-tight">
-          Central de Compras CEGS
+          Cantinho da Army
         </h1>
         <PhoneInput
           value={phone}
