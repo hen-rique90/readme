@@ -3,7 +3,9 @@
 // Code.gs é executado no navegador sobre uma planilha simulada.
 
 export const API_URL = (import.meta.env.VITE_API_URL || '').trim();
-export const IS_DEMO = !API_URL;
+// Supabase tem prioridade; sem nada configurado, o site roda em demonstração
+export const IS_SUPABASE = !!(import.meta.env.VITE_SUPABASE_URL || '').trim();
+export const IS_DEMO = !IS_SUPABASE && !API_URL;
 export const DEMO_PASSWORD = 'army123';
 
 export class ApiError extends Error {
@@ -72,7 +74,10 @@ export async function resetDemo() {
 
 export async function api(action, params = {}) {
   let data;
-  if (IS_DEMO) {
+  if (IS_SUPABASE) {
+    const { callSupabase } = await import('./supabase/backend.js');
+    data = await callSupabase(action, params);
+  } else if (IS_DEMO) {
     const backend = await getDemoBackend();
     await new Promise((r) => setTimeout(r, 250)); // simula a rede
     data = backend.call(action, params);
@@ -96,4 +101,12 @@ export async function api(action, params = {}) {
   }
   if (!data || !data.ok) throw new ApiError((data && data.error) || 'Erro desconhecido.', data || {});
   return data;
+}
+
+// Supabase: já existe login de ADM salvo neste aparelho?
+export async function hasAdminSession() {
+  if (!IS_SUPABASE) return false;
+  const { supabase } = await import('./supabase/backend.js');
+  const { data } = await supabase().auth.getSession();
+  return !!data.session;
 }
