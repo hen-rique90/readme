@@ -72,6 +72,17 @@ export function seedDemo(backend, gas, password) {
       name: 'Mariana Silva', contact: '@mari_jk97', whatsapp: '11988887777', password: '123456', code: mari.order.orderId
     });
   }
+  // Vendas registradas pela ADM (formato da Central de Compras)
+  ['Jin', 'Jimin'].forEach((member, i) => {
+    admin('adminCreateSale', {
+      buyer: { name: 'Mariana Silva', whatsapp: '11988887777' },
+      product: { name: `Album Arirang - Target Korea vers. — ${member}`, member, category: 'Álbuns', image: img('photo-1511671782779-c97d3d27a1d4') },
+      batch: 'CEG EUA - Album Arirang', unitPrice: 30, status: i ? 'A caminho do Brasil' : 'Comprado',
+      note: i ? 'Previsão de chegada em dezembro' : '',
+      payment: { mode: 'avista', paid: true },
+      extras: [{ kind: 'frete', amount: 7.5, paid: !i }, { kind: 'alfandega', amount: i ? 6.2 : 0, paid: false }]
+    });
+  });
   set('requireLogin', 'SIM');
   admin('adminSaveShippingSettings', {
     settings: { fromCep: '01001-000', contactEmail: 'demo@exemplo.com', melhorEnvioToken: 'demo', superFreteToken: 'demo' }

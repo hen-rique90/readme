@@ -106,6 +106,7 @@ function respond_(obj) {
 }
 
 var PUBLIC_ACTIONS = {
+  consultaTelefone: actionConsultaTelefone_,
   catalog: actionCatalog_,
   claim: actionClaim_,
   myOrders: actionMyOrders_,
@@ -929,6 +930,89 @@ function actionSetChargeStatus_(params) {
   return { ok: true };
 }
 
+// ---------- Consulta pelo telefone (Central de Compras) ----------
+var EXTRA_CHARGES = { frete: 'Frete', alfandega: 'Taxa alfândega' };
+
+// Em qual coluna a cobrança entra: item, frete ou alfândega (pela descrição)
+function chargeKind_(description) {
+  var d = str_(description).toLowerCase();
+  if (/alf[aâ]ndeg|taxa|imposto|tribut/.test(d)) return 'alfandega';
+  if (/frete|envio|correios/.test(d)) return 'frete';
+  return 'item';
+}
+
+function payStatus_(list) {
+  if (!list.length) return '';
+  var paid = list.filter(function (c) { return c.status === 'Pago'; }).length;
+  if (paid === list.length) return 'Pago';
+  return paid ? 'Parcial' : 'Pendente';
+}
+
+// "Álbum Arirang — Jin" vira o SET "Álbum Arirang" (o membro vai na coluna Item)
+function setName_(name, member) {
+  var n = str_(name);
+  var m = str_(member).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!m) return n;
+  var cut = n.replace(new RegExp('\\s*[—–-]\\s*' + m + '\\s*$', 'i'), '');
+  return cut || n;
+}
+
+function actionConsultaTelefone_(params) {
+  var whatsapp = phone_(params.whatsapp);
+  if (whatsapp.length < 10 || whatsapp.length > 11) throw userError_('Digite o telefone com DDD, ex: (11) 98888-7777.');
+  var orders = allOrders_().filter(function (o) { return o.whatsapp === whatsapp && o.status !== 'Cancelado'; });
+  var config = publicConfig_();
+  var pay = { pixKey: config.pixKey, pixName: config.pixName, adminWhatsapp: config.adminWhatsapp, storeName: config.storeName };
+  if (!orders.length) return { ok: true, buyer: null, items: [], totals: { owed: 0, paid: 0 }, config: pay };
+
+  var byOrder = {};
+  allCharges_().forEach(function (c) {
+    if (c.status === 'Cancelada') return;
+    (byOrder[c.orderId] = byOrder[c.orderId] || []).push(c);
+  });
+  var products = {};
+  allProducts_().forEach(function (p) { products[p.id] = p; });
+  var owed = 0;
+  var paid = 0;
+  var items = orders.sort(function (a, b) { return a.createdAt < b.createdAt ? -1 : 1; }).map(function (o) {
+    var cols = { item: [], frete: [], alfandega: [] };
+    (byOrder[o.orderId] || []).forEach(function (c) {
+      cols[chargeKind_(c.description)].push(c);
+      if (c.status === 'Pago') paid += c.amount; else owed += c.amount;
+    });
+    var sum = function (list) { return money_(list.reduce(function (t, c) { return t + c.amount; }, 0)); };
+    var nextDue = '';
+    (byOrder[o.orderId] || []).forEach(function (c) {
+      if (c.status !== 'Pago' && c.dueDate && (!nextDue || c.dueDate < nextDue)) nextDue = c.dueDate;
+    });
+    var p = products[o.productId];
+    return {
+      ceg: o.batch || 'Outros',
+      set: setName_(o.productName, o.member),
+      item: o.member || o.productName,
+      quantity: o.quantity,
+      image: o.image || (p ? p.image : ''),
+      valorItem: cols.item.length ? sum(cols.item) : o.itemTotal,
+      pgtoItem: payStatus_(cols.item),
+      valorFrete: cols.frete.length ? sum(cols.frete) : '',
+      pgtoFrete: payStatus_(cols.frete),
+      taxaAlfandega: cols.alfandega.length ? sum(cols.alfandega) : '',
+      pgtoAlfandega: payStatus_(cols.alfandega),
+      andamento: o.status,
+      observacoes: o.note,
+      vencimento: nextDue
+    };
+  });
+  var name = canonicalBuyer_(whatsapp, orders, findClient_(whatsapp));
+  return {
+    ok: true,
+    buyer: { name: name ? name.name : orders[0].buyerName, whatsapp: whatsapp },
+    items: items,
+    totals: { owed: money_(owed), paid: money_(paid) },
+    config: pay
+  };
+}
+
 function newCharge_(order, description, amount, existingIds, dueDate, paid) {
   var charge = {
     chargeId: newId_('COB-', existingIds),
@@ -1563,6 +1647,13 @@ function actionAdminCreateSale_(params) {
   var chargeIdsMap = chargeIds_();
   var charges = parts.map(function (part) {
     return newCharge_(order, part.description, part.amount, chargeIdsMap, part.dueDate, part.paid);
+  });
+  // Frete e taxa da alfândega (opcionais), cada um com seu "já pago"
+  (params.extras || []).forEach(function (x) {
+    var desc = EXTRA_CHARGES[str_(x && x.kind)];
+    var amount = money_(x && x.amount);
+    if (!desc || !(amount > 0)) return;
+    charges.push(newCharge_(order, desc, amount, chargeIdsMap, x.paid ? '' : dateKey_(x.dueDate), !!x.paid));
   });
   order.createdAt = created.toISOString();
   return { ok: true, order: order, charges: charges, product: product };
