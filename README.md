@@ -1,4 +1,4 @@
-# 💜 Central de Compras CEGS
+# 💜 Cantinho da Army
 
 A loja **registra as vendas** no painel ADM, com foto, dados da compradora, valor do item, frete, taxa da alfândega e o que já foi pago. A compradora **digita o telefone** no site e vê tudo, organizado por **CEG → SET → item**:
 
