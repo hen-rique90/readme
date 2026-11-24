@@ -27,6 +27,16 @@ A loja **registra as vendas** no painel ADM, com foto, dados da compradora, valo
 - **Acesso:** a compradora só digita o telefone, sem senha e sem código. Quem souber o número consegue ver as compras daquele telefone.
 - O painel ADM fica em `seu-site/#adm`, com um link discreto "Área da ADM" no rodapé.
 
+## Versão Supabase (cantinhoarmy.vercel.app)
+- **Site:** publicado na Vercel a cada mudança na branch `main` (pasta `web`, `vercel.json`, variáveis em `web/.env.vercel`).
+- **Banco:** Supabase. As tabelas têm as mesmas colunas das abas da planilha. A estrutura fica em `supabase/schema.sql` (gerado por `web/scripts/gerar-sql.mjs`).
+- **Segurança:** sem login, só funciona a consulta pelo telefone. As tabelas só abrem para os e-mails da tabela `admins`.
+- **Painel ADM:** entre com o e-mail e a senha do Supabase (Authentication → Users).
+  - Para liberar outra ADM, crie o usuário lá e inclua o e-mail na tabela `admins`.
+- **Trazer os dados da planilha Google:** ADM → Configurações → 📥, com a senha do painel antigo. Pode repetir sem duplicar.
+- **Fotos:** ficam na pasta pública `fotos` do Supabase Storage.
+- O GitHub Pages continua usando o Apps Script até a troca definitiva.
+
 ## Contas das compradoras
 - A compradora cria a conta com **nome, @, WhatsApp e senha** e fica logada no aparelho por 6 meses.
 - Logada, o botão do catálogo vira **"Quero esse! 💜"**: um toque reserva o item (produtos com Pix parcelado abrem a escolha à vista/parcelado). Logo depois dá para escrever uma observação ou **desfazer** o claim em até 15 minutos.
