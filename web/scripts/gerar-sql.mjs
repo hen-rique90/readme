@@ -35,6 +35,8 @@ ${cols.map((c) => `alter table public.${table} add column if not exists ${c} tex
 alter table public.${table} enable row level security;
 drop policy if exists "adm" on public.${table};
 create policy "adm" on public.${table} for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, insert, update, delete on public.${table} to authenticated;
+revoke all on public.${table} from anon;
 `);
 }
 

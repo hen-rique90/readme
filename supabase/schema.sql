@@ -25,6 +25,8 @@ alter table public.config add column if not exists descricao text not null defau
 alter table public.config enable row level security;
 drop policy if exists "adm" on public.config;
 create policy "adm" on public.config for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, insert, update, delete on public.config to authenticated;
+revoke all on public.config from anon;
 
 create table if not exists public.produtos (
   pos bigint not null default 0,
@@ -61,6 +63,8 @@ alter table public.produtos add column if not exists grupo text not null default
 alter table public.produtos enable row level security;
 drop policy if exists "adm" on public.produtos;
 create policy "adm" on public.produtos for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, insert, update, delete on public.produtos to authenticated;
+revoke all on public.produtos from anon;
 
 create table if not exists public.pedidos (
   pos bigint not null default 0,
@@ -115,6 +119,8 @@ alter table public.pedidos add column if not exists foto text not null default '
 alter table public.pedidos enable row level security;
 drop policy if exists "adm" on public.pedidos;
 create policy "adm" on public.pedidos for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, insert, update, delete on public.pedidos to authenticated;
+revoke all on public.pedidos from anon;
 
 create table if not exists public.cobrancas (
   pos bigint not null default 0,
@@ -143,6 +149,8 @@ alter table public.cobrancas add column if not exists ultimo_lembrete text not n
 alter table public.cobrancas enable row level security;
 drop policy if exists "adm" on public.cobrancas;
 create policy "adm" on public.cobrancas for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, insert, update, delete on public.cobrancas to authenticated;
+revoke all on public.cobrancas from anon;
 
 create table if not exists public.clientes (
   pos bigint not null default 0,
@@ -167,6 +175,8 @@ alter table public.clientes add column if not exists trocar_senha text not null 
 alter table public.clientes enable row level security;
 drop policy if exists "adm" on public.clientes;
 create policy "adm" on public.clientes for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, insert, update, delete on public.clientes to authenticated;
+revoke all on public.clientes from anon;
 
 create table if not exists public.solicitacoes (
   pos bigint not null default 0,
@@ -201,6 +211,8 @@ alter table public.solicitacoes add column if not exists data_aprovada text not 
 alter table public.solicitacoes enable row level security;
 drop policy if exists "adm" on public.solicitacoes;
 create policy "adm" on public.solicitacoes for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, insert, update, delete on public.solicitacoes to authenticated;
+revoke all on public.solicitacoes from anon;
 
 create table if not exists public.enderecos (
   pos bigint not null default 0,
@@ -233,6 +245,8 @@ alter table public.enderecos add column if not exists criado_em text not null de
 alter table public.enderecos enable row level security;
 drop policy if exists "adm" on public.enderecos;
 create policy "adm" on public.enderecos for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, insert, update, delete on public.enderecos to authenticated;
+revoke all on public.enderecos from anon;
 
 create table if not exists public.envios (
   pos bigint not null default 0,
@@ -271,6 +285,8 @@ alter table public.envios add column if not exists pacote text not null default 
 alter table public.envios enable row level security;
 drop policy if exists "adm" on public.envios;
 create policy "adm" on public.envios for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, insert, update, delete on public.envios to authenticated;
+revoke all on public.envios from anon;
 
 -- Fotos enviadas pelo painel (pasta pública "fotos")
 insert into storage.buckets (id, name, public) values ('fotos', 'fotos', true) on conflict (id) do nothing;
