@@ -248,11 +248,15 @@ export function createFakeGas(state = { sheets: {} }, onChange = () => {}) {
 export function loadBackend(code, gas) {
   const factory = new Function(
     'SpreadsheetApp', 'LockService', 'CacheService', 'ContentService', 'Utilities', 'PropertiesService', 'ScriptApp', 'MailApp', 'Logger', 'UrlFetchApp', 'DriveApp',
-    `${code}\nreturn { doGet: doGet, doPost: doPost, setup: setup, ativarResumoDiario: ativarResumoDiario, enviarResumoDiario: enviarResumoDiario };`
+    `${code}\nreturn { doGet: doGet, doPost: doPost, setup: setup, ativarResumoDiario: ativarResumoDiario, enviarResumoDiario: enviarResumoDiario, HEADERS: HEADERS, SHEETS: SHEETS, DEFAULT_CONFIG: DEFAULT_CONFIG,\n  rows: { products: productRow_, orders: orderRow_, charges: chargeRow_, clients: clientRow_, requests: requestRow_, shipments: shipmentRow_ } };`
   );
   const backend = factory(gas.SpreadsheetApp, gas.LockService, gas.CacheService, gas.ContentService, gas.Utilities, gas.PropertiesService,
     gas.ScriptApp, gas.MailApp, gas.Logger, gas.UrlFetchApp, gas.DriveApp);
   return {
+    HEADERS: backend.HEADERS,
+    SHEETS: backend.SHEETS,
+    DEFAULT_CONFIG: backend.DEFAULT_CONFIG,
+    rows: backend.rows,
     call(action, params = {}) {
       const out = backend.doPost({ postData: { contents: JSON.stringify({ action, ...params }) } });
       return JSON.parse(out.getContent());

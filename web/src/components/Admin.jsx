@@ -3,7 +3,7 @@ import {
   ChevronDown, ChevronUp, Download, Edit3, Eye, EyeOff, KeyRound, Lock, LogOut, Package, Phone, Plus,
   BellRing, Inbox, ReceiptText, RefreshCw, Settings, ShoppingCart, Trash2, Truck, Users
 } from 'lucide-react';
-import { api, DEMO_PASSWORD, IS_DEMO, resetDemo } from '../api';
+import { api, API_URL, DEMO_PASSWORD, hasAdminSession, IS_DEMO, IS_SUPABASE, resetDemo } from '../api';
 import {
   CATEGORIES, DEFAULT_GROUP, phoneConflicts, detectMembers, matchesSearch, GROUPS, GROUP_NAMES, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone, groupOf, membersOf,
   wholeGroupLabel,
@@ -19,6 +19,7 @@ import ShipmentsTab, { ShippingSettings } from './ShipmentsTab';
 import { PhotoButton, PhotoUploader } from './PhotoUpload';
 
 const PASS_KEY = 'ceg_adm_senha';
+const SB_MARK = 'supabase'; // no Supabase o login é por e-mail; isto só marca "logada"
 const CHARGE_STATUSES = ['Pendente', 'Pago', 'Cancelada'];
 
 const readPass = () => {
@@ -36,6 +37,7 @@ export default function Admin({ showToast, onCatalogChange }) {
   const [ordersQuery, setOrdersQuery] = useState({ text: '', n: 0 }); // busca vinda de outra aba
 
   const logout = useCallback(() => {
+    if (IS_SUPABASE) api('adminLogout').catch(() => {});
     writePass('');
     setPassword('');
     setData(null);
@@ -60,6 +62,14 @@ export default function Admin({ showToast, onCatalogChange }) {
 
   useEffect(() => {
     if (password) load(password, true);
+    else if (IS_SUPABASE) {
+      // Login do Supabase fica salvo no aparelho
+      hasAdminSession().then((ok) => {
+        if (!ok) return;
+        setPassword(SB_MARK);
+        load(SB_MARK, true);
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -86,7 +96,16 @@ export default function Admin({ showToast, onCatalogChange }) {
   );
 
   if (!data) {
-    return <Login loading={loading} onLogin={async (pass) => {
+    return <Login loading={loading} onLogin={async (pass, email) => {
+      if (IS_SUPABASE) {
+        try {
+          await api('adminLogin', { email, password: pass });
+        } catch (err) {
+          showToast(err.message, 'error');
+          return;
+        }
+        pass = SB_MARK;
+      }
       if (await load(pass)) {
         writePass(pass);
         setPassword(pass);
@@ -179,8 +198,9 @@ export default function Admin({ showToast, onCatalogChange }) {
       {tab === 'batch' && <BatchChargeTab data={data} run={run} />}
       {tab === 'settings' && (
         <div className="space-y-5">
+          {IS_SUPABASE && API_URL && <LegacyImport run={run} />}
           <SettingsTab data={data} run={run} />
-          <ShippingSettings key={JSON.stringify(data.config.shipping || {})} data={data} run={run} call={call} />
+          {!IS_SUPABASE && <ShippingSettings key={JSON.stringify(data.config.shipping || {})} data={data} run={run} call={call} />}
         </div>
       )}
     </main>
@@ -192,13 +212,14 @@ export default function Admin({ showToast, onCatalogChange }) {
 
 function Login({ onLogin, loading }) {
   const [pass, setPass] = useState(IS_DEMO ? DEMO_PASSWORD : '');
+  const [email, setEmail] = useState('');
   return (
     <main className="max-w-sm mx-auto px-4 pt-10">
       <form
         className="card p-6 space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          onLogin(pass);
+          onLogin(pass, email);
         }}
       >
         <div className="text-center">
@@ -208,13 +229,62 @@ function Login({ onLogin, loading }) {
           <h2 className="text-xl font-extrabold text-slate-800">Painel ADM</h2>
           <p className="text-xs text-slate-500 mt-1">Acesso só para quem organiza a CEG.</p>
         </div>
-        <input type="password" required value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Senha" className="input" autoFocus />
+        {IS_SUPABASE && (
+          <input type="email" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" className="input" autoFocus />
+        )}
+        <input type="password" required autoComplete="current-password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Senha" className="input" autoFocus={!IS_SUPABASE} />
         <button className="btn-primary w-full py-3" disabled={loading}>
           {loading && <Spinner className="w-4 h-4" />} Entrar
         </button>
         {IS_DEMO && <p className="text-[11px] text-center text-slate-400">Modo demonstração — senha: {DEMO_PASSWORD}</p>}
       </form>
     </main>
+  );
+}
+
+// Supabase: copia tudo do sistema antigo (planilha Google) com a senha antiga do painel
+function LegacyImport({ run }) {
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const go = async (e) => {
+    e.preventDefault();
+    if (!window.confirm('Copiar pedidos, cobranças, compradoras e produtos da planilha Google para o Supabase? Quem já existe é atualizado (nada é duplicado).')) return;
+    setBusy(true);
+    setError('');
+    setResult(null);
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'adminData', password: pass })
+      }).then((r) => r.json());
+      if (!res.ok) throw new Error(res.error || 'A planilha não respondeu.');
+      const out = await run('adminImportLegacy', { legacy: res }, 'Dados da planilha copiados para o Supabase 💜');
+      if (out) setResult(out.counts);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form onSubmit={go} className="card p-5 space-y-3 border-2 border-dashed border-purple-200">
+      <h3 className="font-extrabold text-slate-800">📥 Trazer os dados da planilha Google</h3>
+      <p className="text-xs text-slate-500">Use a senha do painel antigo (a da linha adminPassword da planilha). Pode repetir quando quiser: atualiza sem duplicar.</p>
+      <div className="flex gap-2">
+        <input type="password" required value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Senha do painel antigo" className="input" autoComplete="off" />
+        <button className="btn-primary shrink-0" disabled={busy}>{busy && <Spinner className="w-4 h-4" />} Copiar</button>
+      </div>
+      {busy && <p className="text-xs text-slate-500">Copiando… pode levar até 1 minuto.</p>}
+      {error && <p className="text-xs font-semibold text-rose-700">{error}</p>}
+      {result && (
+        <p className="text-xs font-semibold text-emerald-700">
+          ✓ {result.orders} pedidos, {result.charges} cobranças, {result.products} produtos, {result.clients} contas copiados.
+        </p>
+      )}
+    </form>
   );
 }
 
@@ -1430,6 +1500,7 @@ function SettingsTab({ data, run }) {
           <span className="block text-[11px] font-medium text-purple-700">A cliente escolhe "Cartão" no claim e vocês mandam o link de pagamento. O site não pede dados de cartão.</span>
         </span>
       </label>
+      {!IS_SUPABASE && (
       <div className="rounded-2xl border border-purple-100 p-3 space-y-3">
         <h4 className="font-extrabold text-slate-800 text-sm">📧 Resumo diário de cobranças</h4>
         <div className="grid sm:grid-cols-[1fr_9rem] gap-3">
@@ -1456,6 +1527,7 @@ function SettingsTab({ data, run }) {
         </button>
         <p className="text-[11px] text-slate-400">Salve o e-mail antes de testar. O e-mail sai da conta Google da planilha; confira também a caixa de spam.</p>
       </div>
+      )}
       <div>
         <label className="label">Nome da loja</label>
         <input value={form.storeName} onChange={set('storeName')} className="input" />
@@ -1483,7 +1555,9 @@ function SettingsTab({ data, run }) {
         <input value={form.noticeBanner} onChange={set('noticeBanner')} className="input" />
       </div>
       <p className="text-[11px] text-slate-500">
-        Para trocar a senha do painel, edite a linha <code>adminPassword</code> na aba <strong>Config</strong> da planilha.
+        {IS_SUPABASE
+          ? <>Para trocar a senha do painel, use "Esqueci a senha" no Supabase (Authentication → Users). Para liberar outra ADM, crie o usuário lá e me peça para incluir o e-mail.</>
+          : <>Para trocar a senha do painel, edite a linha <code>adminPassword</code> na aba <strong>Config</strong> da planilha.</>}
       </p>
       <button className="btn-primary w-full py-3">Salvar</button>
       {IS_DEMO && (
