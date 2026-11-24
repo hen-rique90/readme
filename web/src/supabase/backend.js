@@ -100,6 +100,12 @@ export async function callSupabase(action, params = {}) {
       case 'adminLogout':
         await supabase().auth.signOut();
         return { ok: true };
+      case 'adminBackup':
+      case 'adminRestore': {
+        const { data } = await supabase().auth.getSession();
+        if (!data.session) return { ok: false, error: 'Entre no painel ADM.', authError: true };
+        return action === 'adminBackup' ? await getCore().exportAll() : await getCore().restore(params.backup);
+      }
       case 'adminImportLegacy': {
         const { data } = await supabase().auth.getSession();
         if (!data.session) return { ok: false, error: 'Entre no painel ADM.', authError: true };

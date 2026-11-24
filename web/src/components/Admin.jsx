@@ -135,6 +135,7 @@ export default function Admin({ showToast, onCatalogChange }) {
   return (
     <PhotoUploader.Provider value={uploadPhoto}>
     <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-5">
+      {IS_SUPABASE && <BackupReminder onOpen={() => setTab('settings')} />}
       <Stats data={data} />
 
       <div className="card p-3 flex flex-wrap items-center justify-between gap-3">
@@ -198,6 +199,7 @@ export default function Admin({ showToast, onCatalogChange }) {
       {tab === 'batch' && <BatchChargeTab data={data} run={run} />}
       {tab === 'settings' && (
         <div className="space-y-5">
+          {IS_SUPABASE && <BackupCard run={run} />}
           {IS_SUPABASE && API_URL && <LegacyImport run={run} />}
           <SettingsTab data={data} run={run} />
           {!IS_SUPABASE && <ShippingSettings key={JSON.stringify(data.config.shipping || {})} data={data} run={run} call={call} />}
@@ -239,6 +241,86 @@ function Login({ onLogin, loading }) {
         {IS_DEMO && <p className="text-[11px] text-center text-slate-400">Modo demonstração — senha: {DEMO_PASSWORD}</p>}
       </form>
     </main>
+  );
+}
+
+// ---------- Backup (versão Supabase) ----------
+const BACKUP_KEY = 'ceg_ultimo_backup';
+const lastBackup = () => {
+  try { return Number(localStorage.getItem(BACKUP_KEY)) || 0; } catch { return 0; }
+};
+const daysSince = (t) => (t ? Math.floor((Date.now() - t) / 86400000) : null);
+
+function BackupReminder({ onOpen }) {
+  const days = daysSince(lastBackup());
+  if (days !== null && days < 7) return null;
+  return (
+    <button type="button" onClick={onOpen} className="w-full text-left p-3 rounded-2xl bg-amber-50 border border-amber-200 text-sm text-amber-900 font-semibold">
+      💾 {days === null ? 'Você ainda não baixou um backup neste aparelho.' : `Último backup há ${days} dias.`} Toque aqui e baixe um em Configurações (leva segundos).
+    </button>
+  );
+}
+
+function BackupCard({ run }) {
+  const [busy, setBusy] = useState('');
+  const [last, setLast] = useState(lastBackup);
+  const download = async () => {
+    setBusy('baixar');
+    const res = await run('adminBackup', {});
+    setBusy('');
+    if (!res) return;
+    const day = new Date().toISOString().slice(0, 10);
+    const blob = new Blob([JSON.stringify(res.backup)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `cantinho-da-army-backup-${day}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    try { localStorage.setItem(BACKUP_KEY, String(Date.now())); } catch { /* ignore */ }
+    setLast(Date.now());
+  };
+  const restore = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    let backup;
+    try {
+      backup = JSON.parse(await file.text());
+    } catch {
+      window.alert('Não consegui ler esse arquivo.');
+      return;
+    }
+    const n = backup?.tabelas?.pedidos?.length ?? 0;
+    const when = backup?.gerado_em ? new Date(backup.gerado_em).toLocaleString('pt-BR') : '?';
+    if (!window.confirm(`Restaurar o backup de ${when} (${n} pedidos)?\n\nTUDO o que foi feito depois dessa data será desfeito. Baixe um backup de agora antes, por segurança.`)) return;
+    if (window.prompt('Para confirmar, digite RESTAURAR') !== 'RESTAURAR') return;
+    setBusy('restaurar');
+    await run('adminRestore', { backup }, 'Backup restaurado');
+    setBusy('');
+  };
+  const days = daysSince(last);
+  return (
+    <div className="card p-5 space-y-3">
+      <h3 className="font-extrabold text-slate-800">💾 Backup</h3>
+      <p className="text-xs text-slate-500">
+        Baixa um arquivo com tudo (pedidos, cobranças, compradoras, produtos e configurações). Guarde no celular, no Google Drive ou no e-mail.
+        O ideal é baixar <strong>uma vez por semana</strong>.
+      </p>
+      <p className={`text-xs font-semibold ${days !== null && days < 7 ? 'text-emerald-700' : 'text-amber-700'}`}>
+        {days === null ? 'Nenhum backup baixado neste aparelho.' : days === 0 ? '✓ Backup baixado hoje.' : `Último backup neste aparelho: há ${days} dia(s).`}
+      </p>
+      <div className="grid sm:grid-cols-2 gap-2">
+        <button type="button" onClick={download} disabled={!!busy} className="btn-primary py-3">
+          {busy === 'baixar' && <Spinner className="w-4 h-4" />} Baixar backup completo
+        </button>
+        <label className={`btn-soft py-3 cursor-pointer ${busy ? 'opacity-60 pointer-events-none' : ''}`}>
+          {busy === 'restaurar' && <Spinner className="w-4 h-4" />} Restaurar de um arquivo…
+          <input type="file" accept="application/json,.json" className="hidden" onChange={restore} />
+        </label>
+      </div>
+    </div>
   );
 }
 

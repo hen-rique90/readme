@@ -1,0 +1,25 @@
+# Reserva do acesso automático: duas vezes por semana consulta a configuração
+# pública do Supabase, para o projeto grátis não pausar por falta de uso.
+# (O principal é o agendamento diário da Vercel, em web/vercel.json.)
+name: Manter Supabase ativo
+
+on:
+  schedule:
+    - cron: '23 13 * * 1,4'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Consultar o Supabase
+        run: |
+          set -a; . web/.env.vercel; set +a
+          curl -fsS -X POST "$VITE_SUPABASE_URL/rest/v1/rpc/config_publica" \
+            -H "apikey: $VITE_SUPABASE_ANON_KEY" -H "Authorization: Bearer $VITE_SUPABASE_ANON_KEY" \
+            -H 'Content-Type: application/json' -d '{}' > /dev/null
+          echo "Supabase respondeu: $(date -u)"

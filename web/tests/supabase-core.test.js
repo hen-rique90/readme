@@ -118,3 +118,27 @@ test('supabase (núcleo): importa os dados do Apps Script sem duplicar', async (
   assert.equal(db.tables.pedidos.length, 2);
   assert.deepEqual(db.log, []);
 });
+
+test('supabase (núcleo): backup e restauração deixam o banco igual ao arquivo', async () => {
+  const db = memoryDb();
+  const core = createCore({ code: CODE, db });
+  const venda = (m) => core.run('adminCreateSale', { buyer: { name: 'Angy', whatsapp: '65992466554' }, product: { name: 'Album — ' + m, member: m }, batch: 'CEG', unitPrice: 30, payment: { mode: 'avista' } });
+  await venda('Jin');
+  await venda('RM');
+  const { backup } = await core.exportAll();
+  assert.equal(backup.tabelas.pedidos.length, 2);
+  const antes = JSON.stringify(await core.run('consultaTelefone', { whatsapp: '65992466554' }));
+
+  // depois do backup: uma venda nova, um pagamento e um pedido cancelado
+  await venda('V');
+  const data = await core.run('adminData');
+  await core.run('setChargeStatus', { chargeId: data.charges[0].chargeId, status: 'Pago' });
+  await core.run('setOrderStatus', { orderId: data.orders.find((o) => o.member === 'Jin').orderId, status: 'Cancelado' });
+  assert.notEqual(JSON.stringify(await core.run('consultaTelefone', { whatsapp: '65992466554' })), antes);
+
+  const r = await core.restore(JSON.parse(JSON.stringify(backup)));
+  assert.equal(r.ok, true);
+  assert.equal(db.tables.pedidos.length, 2);
+  assert.equal(JSON.stringify(await core.run('consultaTelefone', { whatsapp: '65992466554' })), antes);
+  await assert.rejects(core.restore({ tabelas: {} }), /não é um backup/);
+});

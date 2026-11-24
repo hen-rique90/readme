@@ -3,5 +3,11 @@
   "framework": "vite",
   "installCommand": "npm ci",
   "buildCommand": "npm run build:vercel",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "crons": [
+    {
+      "path": "/api/manter-ativo",
+      "schedule": "17 11 * * *"
+    }
+  ]
 }
