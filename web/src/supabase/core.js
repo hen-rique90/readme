@@ -129,5 +129,37 @@ export function createCore({ code, db }) {
     });
   }
 
-  return { run, importLegacy, loadState, saveDiff, HEADERS, SHEETS };
+  // Backup: todas as tabelas como estão no banco
+  function exportAll() {
+    return serial(async () => {
+      const tabelas = {};
+      for (const [key, table] of Object.entries(TABLES)) {
+        tabelas[table] = await db.select(table, ['pos', ...columnsOf(HEADERS[key])]);
+      }
+      return { ok: true, backup: { sistema: 'cantinho-da-army', versao: 1, gerado_em: new Date().toISOString(), tabelas } };
+    });
+  }
+
+  // Restaurar: o banco fica exatamente igual ao arquivo de backup
+  function restore(backup) {
+    return serial(async () => {
+      if (!backup || backup.sistema !== 'cantinho-da-army' || !backup.tabelas) throw new Error('Esse arquivo não é um backup do Cantinho da Army.');
+      const { state, snapshot } = await loadState();
+      for (const [key, table] of Object.entries(TABLES)) {
+        const rows = backup.tabelas[table];
+        if (!Array.isArray(rows)) continue;
+        const cols = columnsOf(HEADERS[key]);
+        const sheetRows = rows.slice().sort((x, y) => (Number(x.pos) || 0) - (Number(y.pos) || 0)).map((r) => cols.map((c) => (r[c] ?? '') + ''));
+        if (key === 'config') {
+          const pass = state.sheets[SHEETS.config].find((r) => r[0] === 'adminPassword');
+          if (pass) sheetRows.push(pass);
+        }
+        state.sheets[SHEETS[key]] = [HEADERS[key].slice(), ...sheetRows];
+      }
+      const changes = await saveDiff(state, snapshot);
+      return { ok: true, changes };
+    });
+  }
+
+  return { run, importLegacy, exportAll, restore, loadState, saveDiff, HEADERS, SHEETS };
 }
