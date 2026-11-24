@@ -100,6 +100,11 @@ export async function callSupabase(action, params = {}) {
       case 'adminLogout':
         await supabase().auth.signOut();
         return { ok: true };
+      case 'adminImportLegacy': {
+        const { data } = await supabase().auth.getSession();
+        if (!data.session) return { ok: false, error: 'Entre no painel ADM.', authError: true };
+        return await getCore().importLegacy(params.legacy);
+      }
       case 'adminUploadPhoto':
         return await uploadPhoto(params);
       case 'adminSendDigest':

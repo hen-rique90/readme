@@ -71,18 +71,63 @@ export function createCore({ code, db }) {
 
   // Uma ação de ADM por vez
   let queue = Promise.resolve();
+  const serial = (job) => {
+    const next = queue.then(job, job);
+    queue = next.catch(() => {});
+    return next;
+  };
+
   function run(action, params = {}) {
-    const job = async () => {
+    return serial(async () => {
       const { state, snapshot } = await loadState();
       const gas = createFakeGas(state);
       const res = loadBackend(code, gas).call(action, { ...params, password: LOCAL_ADMIN });
       await saveDiff(gas.state, snapshot);
       return res;
-    };
-    const next = queue.then(job, job);
-    queue = next.catch(() => {});
-    return next;
+    });
   }
 
-  return { run, loadState, saveDiff, HEADERS, SHEETS };
+  // Traz os dados do sistema antigo (resposta do adminData do Apps Script).
+  // Pode rodar mais de uma vez: quem já existe é atualizado, ninguém é duplicado.
+  function importLegacy(legacy) {
+    return serial(async () => {
+      if (!legacy || !Array.isArray(legacy.orders)) throw new Error('Os dados da planilha vieram incompletos.');
+      const { state, snapshot } = await loadState();
+      const counts = {};
+      const put = (key, list) => {
+        const sheet = state.sheets[SHEETS[key]];
+        const index = new Map(sheet.slice(1).map((r, i) => [String(r[0]), i + 1]));
+        (list || []).forEach((obj) => {
+          const row = b.rows[key](obj);
+          const id = String(row[0] ?? '');
+          if (!id) return;
+          if (index.has(id)) sheet[index.get(id)] = row;
+          else {
+            index.set(id, sheet.length);
+            sheet.push(row);
+          }
+        });
+        counts[key] = (list || []).length;
+      };
+      const byDate = (list) => (list || []).slice().sort((x, y) => String(x.createdAt || '').localeCompare(String(y.createdAt || '')));
+      put('products', legacy.products);
+      put('orders', byDate(legacy.orders));
+      put('charges', byDate(legacy.charges));
+      put('clients', legacy.clients);
+      put('requests', legacy.requests);
+      put('shipments', legacy.shipments);
+      const cfg = state.sheets[SHEETS.config];
+      ['storeName', 'pixKey', 'pixName', 'adminWhatsapp', 'noticeBanner', 'reminderEmail'].forEach((k) => {
+        const v = legacy.config && legacy.config[k];
+        if (typeof v !== 'string') return;
+        const row = cfg.find((r) => r[0] === k);
+        if (row) row[1] = v;
+        else cfg.push([k, v, '']);
+      });
+      const changes = await saveDiff(state, snapshot);
+      return { ok: true, counts, changes };
+    });
+  }
+
+  return { run, importLegacy, loadState, saveDiff, HEADERS, SHEETS };
 }

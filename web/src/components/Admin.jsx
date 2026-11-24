@@ -3,7 +3,7 @@ import {
   ChevronDown, ChevronUp, Download, Edit3, Eye, EyeOff, KeyRound, Lock, LogOut, Package, Phone, Plus,
   BellRing, Inbox, ReceiptText, RefreshCw, Settings, ShoppingCart, Trash2, Truck, Users
 } from 'lucide-react';
-import { api, DEMO_PASSWORD, hasAdminSession, IS_DEMO, IS_SUPABASE, resetDemo } from '../api';
+import { api, API_URL, DEMO_PASSWORD, hasAdminSession, IS_DEMO, IS_SUPABASE, resetDemo } from '../api';
 import {
   CATEGORIES, DEFAULT_GROUP, phoneConflicts, detectMembers, matchesSearch, GROUPS, GROUP_NAMES, chargeStatusColor, downloadCSV, formatBRL, formatDate, formatPhone, groupOf, membersOf,
   wholeGroupLabel,
@@ -198,8 +198,9 @@ export default function Admin({ showToast, onCatalogChange }) {
       {tab === 'batch' && <BatchChargeTab data={data} run={run} />}
       {tab === 'settings' && (
         <div className="space-y-5">
+          {IS_SUPABASE && API_URL && <LegacyImport run={run} />}
           <SettingsTab data={data} run={run} />
-          <ShippingSettings key={JSON.stringify(data.config.shipping || {})} data={data} run={run} call={call} />
+          {!IS_SUPABASE && <ShippingSettings key={JSON.stringify(data.config.shipping || {})} data={data} run={run} call={call} />}
         </div>
       )}
     </main>
@@ -238,6 +239,52 @@ function Login({ onLogin, loading }) {
         {IS_DEMO && <p className="text-[11px] text-center text-slate-400">Modo demonstração — senha: {DEMO_PASSWORD}</p>}
       </form>
     </main>
+  );
+}
+
+// Supabase: copia tudo do sistema antigo (planilha Google) com a senha antiga do painel
+function LegacyImport({ run }) {
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const go = async (e) => {
+    e.preventDefault();
+    if (!window.confirm('Copiar pedidos, cobranças, compradoras e produtos da planilha Google para o Supabase? Quem já existe é atualizado (nada é duplicado).')) return;
+    setBusy(true);
+    setError('');
+    setResult(null);
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'adminData', password: pass })
+      }).then((r) => r.json());
+      if (!res.ok) throw new Error(res.error || 'A planilha não respondeu.');
+      const out = await run('adminImportLegacy', { legacy: res }, 'Dados da planilha copiados para o Supabase 💜');
+      if (out) setResult(out.counts);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form onSubmit={go} className="card p-5 space-y-3 border-2 border-dashed border-purple-200">
+      <h3 className="font-extrabold text-slate-800">📥 Trazer os dados da planilha Google</h3>
+      <p className="text-xs text-slate-500">Use a senha do painel antigo (a da linha adminPassword da planilha). Pode repetir quando quiser: atualiza sem duplicar.</p>
+      <div className="flex gap-2">
+        <input type="password" required value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Senha do painel antigo" className="input" autoComplete="off" />
+        <button className="btn-primary shrink-0" disabled={busy}>{busy && <Spinner className="w-4 h-4" />} Copiar</button>
+      </div>
+      {busy && <p className="text-xs text-slate-500">Copiando… pode levar até 1 minuto.</p>}
+      {error && <p className="text-xs font-semibold text-rose-700">{error}</p>}
+      {result && (
+        <p className="text-xs font-semibold text-emerald-700">
+          ✓ {result.orders} pedidos, {result.charges} cobranças, {result.products} produtos, {result.clients} contas copiados.
+        </p>
+      )}
+    </form>
   );
 }
 

@@ -82,3 +82,39 @@ test('supabase (núcleo): grava só o que mudou e nunca a senha interna', async 
   assert.equal(r.items.length, 3);
   assert.equal(r.items[0].valorFrete, 7.5);
 });
+
+test('supabase (núcleo): importa os dados do Apps Script sem duplicar', async () => {
+  // "Sistema antigo": o próprio Code.gs com algumas vendas
+  const { createFakeGas, loadBackend } = await import('../src/demo/fakeGas.js');
+  const gas = createFakeGas();
+  const old = loadBackend(CODE, gas);
+  old.call('catalog');
+  const cfg = gas.state.sheets.Config;
+  cfg.find((r) => r[0] === 'adminPassword')[1] = 'velha';
+  cfg.find((r) => r[0] === 'pixKey')[1] = 'pix@antigo.com';
+  cfg.find((r) => r[0] === 'requireLogin')[1] = 'NÃO';
+  const adm = (a, p = {}) => old.call(a, { ...p, password: 'velha' });
+  const p = adm('saveProduct', { product: { isNew: true, name: 'PC Jin', member: 'Jin', category: 'Photocards', price: 20, totalStock: 3, image: 'https://x/jin.jpg' } });
+  old.call('claim', { productId: p.product.id, quantity: 1, buyerName: 'Lara', contact: '@l', whatsapp: '11911112222' });
+  adm('adminCreateSale', { buyer: { name: 'Angy', whatsapp: '65992466554' }, product: { name: 'Album — RM', member: 'RM' }, batch: 'CEG EUA', unitPrice: 30,
+    payment: { mode: 'avista', paid: true }, extras: [{ kind: 'alfandega', amount: 12 }] });
+  const legacy = adm('adminData');
+  const expected = old.call('consultaTelefone', { whatsapp: '65992466554' });
+
+  const db = memoryDb();
+  const core = createCore({ code: CODE, db });
+  const r = await core.importLegacy(legacy);
+  assert.equal(r.ok, true);
+  assert.equal(db.tables.pedidos.length, 2);
+  assert.equal(db.tables.cobrancas.length, legacy.charges.length);
+  assert.equal(db.tables.config.find((c) => c.chave === 'pixKey').valor, 'pix@antigo.com');
+  assert.ok(!db.tables.config.some((c) => c.chave === 'adminPassword'));
+  const got = await core.run('consultaTelefone', { whatsapp: '65992466554' });
+  assert.deepEqual(got.items, expected.items);
+  assert.deepEqual(got.totals, expected.totals);
+  // importar de novo não duplica nem muda nada
+  db.log.length = 0;
+  await core.importLegacy(legacy);
+  assert.equal(db.tables.pedidos.length, 2);
+  assert.deepEqual(db.log, []);
+});
